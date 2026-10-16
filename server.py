@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Verdant 3D — Multi-AI + OpenRouter & Serper Backend")
+app = FastAPI(title="Verdant 3D — Stable Multi-AI Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,23 +20,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Optional Server-Side Environment Variables (Fallback if not passed from UI)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "gemini-2.5-flash")
 
-# Maps non-existent/deprecated model aliases so Gemini API never rejects older 2.5 or placeholder strings
 GEMINI_MODEL_ALIASES = {
     "gemini-3.8-flash": "gemini-2.5-flash",
     "gemini-3.6-flash": "gemini-2.5-flash",
     "gemini-2.5": "gemini-2.5-flash",
     "gemini-2.5-flash-latest": "gemini-2.5-flash",
     "gemini-2.5-pro-latest": "gemini-2.5-pro",
-    "gemini-2.5-flash-preview-05-20": "gemini-2.5-flash",
-    "gemini-2.5-pro-preview-05-06": "gemini-2.5-pro",
     "gemini-1.5-flash": "gemini-2.5-flash",
     "gemini-1.5-pro": "gemini-2.5-pro",
 }
@@ -103,11 +98,12 @@ async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
             if res.status_code == 200:
                 data = res.json()
                 bits = []
-                if kg := data.get("knowledgeGraph"):
-                    if desc := kg.get("description"):
-                        bits.append(desc)
+                kg = data.get("knowledgeGraph")
+                if kg and kg.get("description"):
+                    bits.append(kg.get("description"))
                 for org in data.get("organic", [])[:4]:
-                    if s := org.get("snippet"):
+                    s = org.get("snippet")
+                    if s:
                         bits.append(s)
                 if bits:
                     return " | ".join(bits)[:800]
@@ -118,17 +114,8 @@ async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
 
 async def call_gemini(client: httpx.AsyncClient, api_key: str, model: str, system_prompt: str, user_prompt: str) -> str:
     primary = normalize_gemini_model(model)
-    fallbacks = [
-        primary,
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-    ]
-    models_to_try = []
-    for m in fallbacks:
-        if m and m not in models_to_try:
-            models_to_try.append(m)
+    fallbacks = [primary, "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+    models_to_try = [m for i, m in enumerate(fallbacks) if m and m not in fallbacks[:i]]
 
     last_err = ""
     for m in models_to_try:
@@ -165,40 +152,12 @@ async def call_gemini(client: httpx.AsyncClient, api_key: str, model: str, syste
         except Exception as e:
             last_err = str(e)
             continue
-
     raise RuntimeError(last_err or "Gemini request failed.")
-
-
-async def call_openrouter(client: httpx.AsyncClient, api_key: str, model: str, system_prompt: str, user_prompt: str) -> str:
-    target_model = (model or "google/gemini-2.5-flash").strip()
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://verdant3d.local",
-        "X-Title": "Verdant 3D Builder",
-    }
-    payload = {
-        "model": target_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 8192,
-    }
-    res = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-    if res.status_code != 200:
-        raise RuntimeError(f"OpenRouter HTTP {res.status_code}: {res.text[:240]}")
-    data = res.json()
-    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
 
 async def call_openai(client: httpx.AsyncClient, api_key: str, model: str, system_prompt: str, user_prompt: str) -> str:
     target_model = (model or "gpt-4o").strip()
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": target_model,
         "messages": [
@@ -221,11 +180,7 @@ async def call_openai(client: httpx.AsyncClient, api_key: str, model: str, syste
 
 async def call_anthropic(client: httpx.AsyncClient, api_key: str, model: str, system_prompt: str, user_prompt: str) -> str:
     target_model = (model or "claude-sonnet-4-20250514").strip()
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
+    headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
     payload = {
         "model": target_model,
         "max_tokens": 8192,
@@ -241,63 +196,41 @@ async def call_anthropic(client: httpx.AsyncClient, api_key: str, model: str, sy
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
 
 
-async def call_llm_architect(
-    system_prompt: str,
-    user_prompt: str,
-    provider: str = "",
-    model: str = "",
-    api_key: str = "",
-) -> str:
+async def call_llm_architect(system_prompt: str, user_prompt: str, provider: str = "", model: str = "", api_key: str = "") -> str:
     prov = (provider or "").lower().strip()
     key = (api_key or "").strip()
 
     async with httpx.AsyncClient(timeout=95.0) as client:
-        # 1. Explicit provider requested from UI
         if prov == "gemini" and (key or GEMINI_API_KEY):
             return await call_gemini(client, key or GEMINI_API_KEY, model or AI_MODEL, system_prompt, user_prompt)
-        if prov == "openrouter" and (key or OPENROUTER_API_KEY):
-            return await call_openrouter(client, key or OPENROUTER_API_KEY, model, system_prompt, user_prompt)
         if prov == "openai" and (key or OPENAI_API_KEY):
             return await call_openai(client, key or OPENAI_API_KEY, model, system_prompt, user_prompt)
         if prov == "anthropic" and (key or ANTHROPIC_API_KEY):
             return await call_anthropic(client, key or ANTHROPIC_API_KEY, model, system_prompt, user_prompt)
 
-        # 2. Cascade through configured server environment keys
         errors: List[str] = []
         if GEMINI_API_KEY:
             try:
                 return await call_gemini(client, GEMINI_API_KEY, model or AI_MODEL, system_prompt, user_prompt)
             except Exception as e:
                 errors.append(str(e))
-
-        if OPENROUTER_API_KEY:
-            try:
-                return await call_openrouter(client, OPENROUTER_API_KEY, model or "google/gemini-2.5-flash", system_prompt, user_prompt)
-            except Exception as e:
-                errors.append(str(e))
-
         if OPENAI_API_KEY:
             try:
                 return await call_openai(client, OPENAI_API_KEY, model or "gpt-4o", system_prompt, user_prompt)
             except Exception as e:
                 errors.append(str(e))
-
         if ANTHROPIC_API_KEY:
             try:
                 return await call_anthropic(client, ANTHROPIC_API_KEY, model or "claude-sonnet-4-20250514", system_prompt, user_prompt)
             except Exception as e:
                 errors.append(str(e))
 
-        # 3. Free cloud fallback if no keys are configured
         try:
             res = await client.post(
                 "https://text.pollinations.ai/openai",
                 json={
                     "model": "openai",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
                     "temperature": 0.3,
                     "jsonMode": True,
                 },
@@ -310,8 +243,7 @@ async def call_llm_architect(
         except Exception as e:
             errors.append(str(e))
 
-    detail_msg = " | ".join(errors) if errors else "No AI API key provided or all providers failed."
-    raise HTTPException(status_code=502, detail=detail_msg)
+    raise HTTPException(status_code=502, detail=" | ".join(errors) if errors else "All AI providers failed.")
 
 
 def parse_and_validate_build(raw_text: str, prompt: str) -> Dict[str, Any]:
@@ -357,7 +289,6 @@ def parse_and_validate_build(raw_text: str, prompt: str) -> Dict[str, Any]:
             "smooth": round(max(0.0, min(1.0, float(item.get("smooth", 0.02)))), 3),
         })
 
-    # Grounding check
     if ops:
         min_y = min(p["pos"][1] - p["size"][1] / 2 for p in ops)
         if abs(min_y) > 0.01:
@@ -365,10 +296,7 @@ def parse_and_validate_build(raw_text: str, prompt: str) -> Dict[str, Any]:
             for p in ops:
                 p["pos"][1] = round(p["pos"][1] + offset_y, 3)
 
-    return {
-        "title": str(data.get("title") or prompt.title()),
-        "ops": ops,
-    }
+    return {"title": str(data.get("title") or prompt.title()), "ops": ops}
 
 
 @app.post("/test-key")
@@ -376,7 +304,6 @@ async def test_key(req: TestKeyRequest):
     prov = req.provider.lower().strip()
     key = req.api_key.strip()
     model = (req.model or "").strip()
-
     if not key:
         raise HTTPException(status_code=400, detail="API key is empty.")
 
@@ -389,94 +316,39 @@ async def test_key(req: TestKeyRequest):
                     json={"q": "3D low poly model", "num": 1},
                 )
                 if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail=f"Serper rejected key (HTTP {res.status_code}).")
-                return {"ok": True, "provider": "serper", "message": "Serper Web Search verified & active!"}
-
+                    raise HTTPException(status_code=400, detail="Serper rejected key.")
+                return {"ok": True, "message": "Serper verified & active!"}
             elif prov == "gemini":
                 m = normalize_gemini_model(model or "gemini-2.5-flash")
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
-                res = await client.post(
-                    url,
-                    json={
-                        "contents": [{"role": "user", "parts": [{"text": "Reply with OK"}]}],
-                        "generationConfig": {"maxOutputTokens": 10},
-                    },
-                )
+                res = await client.post(url, json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 10}})
                 if res.status_code != 200:
-                    if m != "gemini-2.5-flash":
-                        url2 = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
-                        res2 = await client.post(
-                            url2,
-                            json={
-                                "contents": [{"role": "user", "parts": [{"text": "Reply with OK"}]}],
-                                "generationConfig": {"maxOutputTokens": 10},
-                            },
-                        )
-                        if res2.status_code == 200:
-                            return {"ok": True, "provider": "gemini", "message": "Gemini key verified (using gemini-2.5-flash)!"}
-                    raise HTTPException(status_code=400, detail=f"Gemini error ({res.status_code}): {res.text[:160]}")
-                return {"ok": True, "provider": "gemini", "message": f"Gemini verified ({m})!"}
-
-            elif prov == "openrouter":
-                m = model or "google/gemini-2.5-flash"
-                res = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {key}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://verdant3d.local",
-                        "X-Title": "Verdant 3D Builder",
-                    },
-                    json={
-                        "model": m,
-                        "messages": [{"role": "user", "content": "Reply with OK"}],
-                        "max_tokens": 10,
-                    },
-                )
-                if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail=f"OpenRouter error ({res.status_code}): {res.text[:160]}")
-                return {"ok": True, "provider": "openrouter", "message": f"OpenRouter verified ({m})!"}
-
+                    raise HTTPException(status_code=400, detail=f"Gemini error: {res.text[:120]}")
+                return {"ok": True, "message": f"Gemini verified ({m})!"}
             elif prov == "openai":
-                m = model or "gpt-4o-mini"
                 res = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={
-                        "model": m,
-                        "messages": [{"role": "user", "content": "Reply with OK"}],
-                        "max_tokens": 10,
-                    },
+                    json={"model": model or "gpt-4o-mini", "messages": [{"role": "user", "content": "OK"}], "max_tokens": 10},
                 )
                 if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail=f"OpenAI error ({res.status_code}): {res.text[:160]}")
-                return {"ok": True, "provider": "openai", "message": f"OpenAI verified ({m})!"}
-
+                    raise HTTPException(status_code=400, detail="OpenAI key rejected.")
+                return {"ok": True, "message": "OpenAI verified!"}
             elif prov == "anthropic":
-                m = model or "claude-sonnet-4-20250514"
                 res = await client.post(
                     "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": key,
-                        "anthropic-version": "2023-06-01",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": m,
-                        "max_tokens": 10,
-                        "messages": [{"role": "user", "content": "Reply with OK"}],
-                    },
+                    headers={"x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+                    json={"model": model or "claude-sonnet-4-20250514", "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]},
                 )
                 if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail=f"Anthropic error ({res.status_code}): {res.text[:160]}")
-                return {"ok": True, "provider": "anthropic", "message": f"Anthropic verified ({m})!"}
-
+                    raise HTTPException(status_code=400, detail="Anthropic key rejected.")
+                return {"ok": True, "message": "Anthropic verified!"}
             else:
-                raise HTTPException(status_code=400, detail=f"Unknown provider: {prov}")
+                raise HTTPException(status_code=400, detail="Unknown provider")
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/generate")
@@ -487,28 +359,16 @@ async def generate(req: GenerateRequest):
 
     web_ctx = req.web_context.strip() if req.web_context else ""
     if not web_ctx and req.use_serper:
-        web_ctx = await fetch_anatomical_research(prompt, override_key=req.serper_key or "")
+        web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "")
 
     user_instruction = f"Subject: '{prompt}'. Build a clean, game-ready Roblox asset using 30 to 55 crisp parts."
     if web_ctx:
-        user_instruction += f"\n\nReal-World Web Reference (via Serper Search):\n{web_ctx}\nUse these accurate visual proportions, structural components, and colors."
+        user_instruction += f"\n\nReal-World Web Reference (via Serper Search):\n{web_ctx}\nUse these accurate visual proportions and colors."
 
-    try:
-        raw_output = await call_llm_architect(
-            system_prompt=MASTER_SCULPTING_SKILL,
-            user_prompt=user_instruction,
-            provider=req.provider or "",
-            model=req.model or "",
-            api_key=req.api_key or "",
-        )
-        result = parse_and_validate_build(raw_output, prompt)
-        result["used_serper"] = bool(web_ctx)
-        result["web_context"] = web_ctx
-        return JSONResponse(content=result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raw_output = await call_llm_architect(MASTER_SCULPTING_SKILL, user_instruction, req.provider or "", req.model or "", req.api_key or "")
+    result = parse_and_validate_build(raw_output, prompt)
+    result["used_serper"] = bool(web_ctx)
+    return JSONResponse(content=result)
 
 
 @app.get("/health")
@@ -521,7 +381,7 @@ async def serve_ui():
     html_path = Path(__file__).parent / "index.html"
     if html_path.exists():
         return FileResponse(html_path, media_type="text/html")
-    return HTMLResponse("<h3>index.html not found next to server.py</h3>")
+    return HTMLResponse("<h3>index.html not found</h3>")
 
 
 if __name__ == "__main__":
