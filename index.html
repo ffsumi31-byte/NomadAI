@@ -554,6 +554,33 @@ async function runOps(ops, gap) {
   const my = ++token;
   let bad = 0;
   
+  for (const [n, o] of ops.entries()) {
+    if (my != token) return;
+    try {
+      apply(o);
+      // Only log every few parts or for important steps to avoid DOM choking
+      if (gap > 40 && n % 5 === 0) step('✓ Built part ' + (n + 1));
+    } catch (e) {
+      bad++;
+    }
+    
+    // Update progress bar smoothly without lagging
+    progSet((n + 1) / ops.length * 100);
+    
+    // Only fit and refresh UI periodically or on the last item, preventing browser lockup
+    if (n % 10 === 0 || n === ops.length - 1) {
+      fit();
+      refresh();
+    }
+    
+    // Tiny yield to let the browser breathe (prevents "Aw, Snap!" memory/CPU spikes)
+    await sleep(5);
+  }
+  
+  step('✓ Model built successfully (' + ops.length + ' parts).', 'ok');
+  return bad;
+}
+  
   // 1. Instantly load all parts into the 3D world first without lagging the UI
   for (const [n, o] of ops.entries()) {
     if (my != token) return;
