@@ -2,357 +2,183 @@
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><title>Verdant 3D</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
-/* One green palette. Text colors are chosen for contrast (ink 15:1, secondary 6:1, green 4.9:1 on white). */
-:root{--bg:#fff;--soft:#f4faf6;--tint:#e3f4ea;--ink:#0f2a20;--mut:#4a6458;--g:#178a4c;--gh:#0f6b3a;--gl:#a9dcbd;--ln:#d5e8dc;--card:#fff;--bad:#b3342f;--ease:cubic-bezier(.2,.8,.2,1);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px)}
+:root{--bg:#fff;--soft:#f4faf6;--tint:#e3f4ea;--ink:#0f2a20;--mut:#4a6458;--g:#178a4c;--gh:#0f6b3a;--gl:#a9dcbd;--ln:#d5e8dc;--card:#fff;--bad:#b3342f;--ease:cubic-bezier(.2,.8,.2,1);color-scheme:light;box-sizing:border-box}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%}
-html{scrollbar-gutter:stable}
-body{background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,"Segoe UI",sans-serif;display:flex;min-height:100vh;overflow-x:hidden}
-body{background:#f8fdfa}main{background:transparent}
-.blob{position:fixed;width:42vmax;height:42vmax;border-radius:50%;filter:blur(100px);opacity:.1;z-index:0;pointer-events:none;animation:drift 45s ease-in-out infinite alternate}
-.b1{background:#8fe3a9;right:-12vmax;top:-14vmax}.b2{background:#27c4d8;left:20vmax;bottom:-24vmax;opacity:.05;animation-delay:-20s}
-@keyframes drift{to{transform:translate(-6vmax,5vmax)}}
+body{background:#f8fdfa;color:var(--ink);font:15px/1.6 system-ui,"Segoe UI",sans-serif;display:flex;min-height:100vh;overflow-x:hidden}
+main{flex:1;min-width:0;position:relative;z-index:1;padding:30px 36px 50px;max-width:1120px}
+.blob{position:fixed;width:42vmax;height:42vmax;border-radius:50%;filter:blur(100px);opacity:.1;z-index:0;pointer-events:none}
+.b1{background:#8fe3a9;right:-12vmax;top:-14vmax}
 
-/* ═══ Page background ═══ */
-@property --hx{syntax:'<percentage>';inherits:true;initial-value:88%}
-@property --hy{syntax:'<percentage>';inherits:true;initial-value:-8%}
-@property --lx{syntax:'<percentage>';inherits:true;initial-value:-6%}
-@property --ly{syntax:'<percentage>';inherits:true;initial-value:105%}
-#bg{--sw:224px;--px:0;--py:0;position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
-#bg>*{position:absolute}
-#bg[data-page=ai]{--hx:10%;--hy:-6%;--lx:96%;--ly:104%;--tx:-26px;--ty:16px}
-#bg[data-page=parts]{--hx:94%;--hy:46%;--lx:2%;--ly:2%;--tx:18px;--ty:-22px}
-#bg[data-page=library]{--hx:4%;--hy:-8%;--lx:92%;--ly:102%;--tx:-12px;--ty:26px}
-#bg[data-page=pricing]{--hx:50%;--hy:-16%;--lx:50%;--ly:114%;--tx:24px;--ty:8px}
-.bg-mesh{inset:0;background:
- radial-gradient(900px 620px at var(--hx) var(--hy),rgba(143,227,169,.30),transparent 62%),
- radial-gradient(820px 640px at var(--lx) var(--ly),rgba(169,220,189,.34),transparent 64%),
- radial-gradient(640px 440px at 55% 42%,rgba(227,244,234,.6),transparent 72%),
- linear-gradient(180deg,#f9fdfb,#f0f8f3);
- transition:--hx 1.4s var(--ease),--hy 1.4s var(--ease),--lx 1.4s var(--ease),--ly 1.4s var(--ease)}
-.bg-iso{inset:-20px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='103.92'%3E%3Cpath d='M0 0L60 103.92M60 0L0 103.92M0 0H60M0 51.96H60' fill='none' stroke='%23178a4c' stroke-opacity='.1'/%3E%3C/svg%3E") 0 0/60px 103.92px;transform:translate(calc(var(--px)*-6px),calc(var(--py)*-6px));transition:transform .9s var(--ease)}
-.bg-iso.a{-webkit-mask-image:radial-gradient(ellipse 58% 52% at 92% 6%,#000,transparent 72%);mask-image:radial-gradient(ellipse 58% 52% at 92% 6%,#000,transparent 72%)}
-.bg-iso.b{background-position:30px 52px;-webkit-mask-image:radial-gradient(ellipse 52% 46% at 8% 98%,#000,transparent 70%);mask-image:radial-gradient(ellipse 52% 46% at 8% 98%,#000,transparent 70%)}
-.bg-dots{inset:0;opacity:.55;background:radial-gradient(circle,rgba(23,138,76,.2) 1px,transparent 1.5px) 0 0/28px 28px;-webkit-mask-image:radial-gradient(ellipse 62% 54% at 64% 52%,#000,transparent 78%);mask-image:radial-gradient(ellipse 62% 54% at 64% 52%,#000,transparent 78%)}
-.bg-topo{left:-3%;top:-3%;width:106%;height:106%;transform:translate(calc(var(--tx,0px) + var(--px)*-8px),calc(var(--ty,0px) + var(--py)*-6px));transition:transform 1.6s var(--ease)}
-.tl{fill:none;stroke:var(--g);stroke-width:1;vector-effect:non-scaling-stroke}
-.sh{width:var(--w);left:calc(var(--sw) + (100% - var(--sw))*var(--lf));top:calc(100%*var(--tp));transform:translate(calc(var(--px)*var(--d)*1px),calc(var(--py)*var(--d)*1px));transition:transform .9s var(--ease)}
-.sh svg{display:block;width:100%;height:auto;fill:none;stroke:var(--g);stroke-opacity:.26;stroke-width:1.2;stroke-linejoin:round;stroke-linecap:round;animation:bgf 20s ease-in-out infinite alternate;animation-delay:var(--dl)}
-.sh .h{fill:#fff;stroke-opacity:.5}.sh .dash{stroke-dasharray:3 4;stroke-opacity:.18}.sh .dot{fill:var(--g);stroke:none;fill-opacity:.4}
-@keyframes bgf{from{transform:translateY(-9px) rotate(-3deg)}to{transform:translateY(9px) rotate(3deg)}}
-.bg-grain{inset:0;opacity:.22;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .09 0 0 0 0 .54 0 0 0 0 .3 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E")}
-.bg-vig{inset:0;background:radial-gradient(120% 90% at 50% 40%,transparent 55%,rgba(23,138,76,.06))}
-.bg-ruler{opacity:.5}
-.bg-ruler.t{left:var(--sw);right:0;top:0;height:11px;background:repeating-linear-gradient(90deg,rgba(23,138,76,.3) 0 1px,transparent 1px 10px) 0 0/100% 5px no-repeat,repeating-linear-gradient(90deg,rgba(23,138,76,.45) 0 1px,transparent 1px 50px) 0 0/100% 11px no-repeat;-webkit-mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent)}
-.bg-ruler.r{right:0;top:0;bottom:0;width:11px;background:repeating-linear-gradient(180deg,rgba(23,138,76,.3) 0 1px,transparent 1px 10px) 100% 0/5px 100% no-repeat,repeating-linear-gradient(180deg,rgba(23,138,76,.45) 0 1px,transparent 1px 50px) 100% 0/11px 100% no-repeat;-webkit-mask-image:linear-gradient(180deg,transparent,#000 14%,#000 86%,transparent);mask-image:linear-gradient(180deg,transparent,#000 14%,#000 86%,transparent)}
-.bg-gizmo{right:26px;bottom:44px;width:64px;height:64px;opacity:.7;transform:translate(calc(var(--px)*-4px),calc(var(--py)*-4px));transition:transform .9s var(--ease)}
-.bg-coords{right:26px;bottom:20px;font:10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;color:var(--mut);opacity:.75;letter-spacing:.02em}
-@media(max-width:1000px){.bg-gizmo,.bg-coords{display:none}}
-@media(max-width:760px){#bg{--sw:0px}.sh.opt,.bg-ruler{display:none}}
-
-/* icons */
-.ico{width:18px;height:18px;flex:none;display:block;transition:transform .25s var(--ease),color .2s}
-[data-i]{display:inline-flex}
-
-/* sidebar */
+/* Layout & Sidebar */
 .side{position:sticky;top:0;height:100vh;width:224px;flex:none;background:linear-gradient(180deg,var(--soft),#fff 260px);border-right:1px solid var(--ln);padding:22px 14px;display:flex;flex-direction:column;z-index:3}
 .logo{font-weight:700;font-size:17px;padding:0 10px 22px;display:flex;align-items:center;gap:10px;cursor:pointer}
-.logo i{width:26px;height:26px;border-radius:6px;background:var(--g);color:#fff;display:grid;place-items:center;transition:transform .4s var(--ease)}.logo i .ico{width:16px;height:16px}
-.logo:hover i{transform:rotate(-8deg) scale(1.06)}
-.nav{position:relative;display:flex;flex-direction:column;gap:4px}
-.nav-ind{position:absolute;left:0;right:0;top:0;height:40px;border-radius:5px;background:var(--tint);transition:transform .35s var(--ease),height .3s;pointer-events:none}
-.nav-ind.n{transition:none}
-.nav-ind::before{content:"";position:absolute;left:0;top:25%;bottom:25%;width:3px;border-radius:2px;background:var(--g)}
-.nav button{position:relative;z-index:1;display:flex;align-items:center;gap:11px;border:0;background:none;color:var(--mut);font:inherit;font-weight:500;padding:10px 12px;border-radius:5px;cursor:pointer;text-align:left;transition:color .2s,background .2s}
-.nav button .ico{width:20px;height:20px}
-.nav button:not(.on):hover{background:var(--soft);color:var(--ink)}
-.nav button:hover .ico{transform:translateX(2px)}
-.nav button.on{color:var(--ink)}.nav button.on .ico{color:var(--g)}
-.sfoot{margin-top:auto;padding:12px;background:linear-gradient(180deg,var(--tint),var(--soft) 60%);border:1px solid var(--ln);border-radius:5px;font-size:13px;color:var(--mut)}.sfoot b{color:var(--ink)}
+.logo i{width:26px;height:26px;border-radius:6px;background:var(--g);color:#fff;display:grid;place-items:center}
+.nav{display:flex;flex-direction:column;gap:4px}
+.nav button{display:flex;align-items:center;gap:11px;border:0;background:none;color:var(--mut);font:inherit;font-weight:500;padding:10px 12px;border-radius:5px;cursor:pointer;text-align:left;transition:all .2s}
+.nav button:hover{background:var(--soft);color:var(--ink)}
+.nav button.on{color:var(--ink);background:var(--tint);font-weight:600}
+.nav button .ico{width:20px;height:20px;color:var(--g)}
+.sfoot{margin-top:auto;padding:12px;background:linear-gradient(180deg,var(--tint),var(--soft));border:1px solid var(--ln);border-radius:5px;font-size:13px;color:var(--mut)}
 .meter{height:4px;border-radius:4px;background:var(--ln);margin:8px 0 0;overflow:hidden}
-.meter i{display:block;height:100%;width:0;background:var(--g);border-radius:4px;transition:width .5s var(--ease)}
+.meter i{display:block;height:100%;width:0;background:var(--g);transition:width .5s}
 
-main{flex:1;min-width:0;position:relative;z-index:1;padding:30px 36px 50px;max-width:1120px}
+/* Pages & Typography */
 .page{display:none}.page.on{display:block;animation:up .35s var(--ease) both}
-@keyframes up{from{opacity:0;transform:translateY(10px)}}
-@keyframes draw{from{transform:scaleX(0)}}
-@keyframes grow{from{transform:scaleY(0)}}
-.stag>*{animation:up .45s var(--ease) both}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+h1{font-size:clamp(32px,4vw,48px);font-weight:800;letter-spacing:-.03em;margin:0 0 10px;color:var(--ink)}
+h1 em{font-style:normal;color:var(--g)}
+h2{margin:0 0 4px;font-size:24px;font-weight:800;color:var(--ink)}
+.sub{color:var(--mut);margin:0 0 22px;font-size:15px}
 
-/* type */
-h1{font-size:clamp(34px,5vw,54px);font-weight:800;letter-spacing:-.035em;line-height:1.08;margin:0 0 10px;color:var(--ink);isolation:isolate}
-h1 em{font-style:normal;color:var(--g);position:relative;display:inline-block}
-h1 em::after{content:"";position:absolute;left:0;right:0;bottom:-.02em;height:.14em;background:var(--gl);opacity:.85;border-radius:4px;z-index:-1;transform-origin:left;animation:draw .8s .6s var(--ease) both}
-h2{margin:0 0 4px;font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--ink);display:flex;align-items:center;gap:10px}
-h2::before{content:"";width:5px;height:24px;border-radius:3px;background:var(--g);animation:grow .5s var(--ease) both}
-.sub{color:var(--mut);margin:0 0 22px;max-width:60ch;font-size:16px}
-
-/* buttons */
-.btn,.chip{position:relative;overflow:hidden}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;font:inherit;border:1px solid var(--ln);background:var(--card);color:var(--ink);padding:8px 15px;border-radius:5px;cursor:pointer;transition:background .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease),transform .15s var(--ease)}
-.btn:hover{border-color:var(--g);background:var(--soft);color:var(--gh)}.btn:active{transform:scale(.97)}.btn:disabled{opacity:.6;pointer-events:none}
+/* Buttons & Inputs */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;font:inherit;border:1px solid var(--ln);background:var(--card);color:var(--ink);padding:8px 15px;border-radius:5px;cursor:pointer;transition:all .2s}
+.btn:hover{border-color:var(--g);background:var(--soft);color:var(--gh)}
 .btn.pri{background:var(--g);color:#fff;border-color:var(--g);font-weight:600}
-.btn.pri:hover{background:#fff;color:var(--g);border-color:var(--g)}
-.btn.sm{padding:4px 10px;font-size:13px}.btn.sm .ico{width:15px;height:15px}
-.btn.on{background:var(--tint);border-color:var(--g);color:var(--gh)}
-.btn [data-i="arrow"]{transition:transform .25s var(--ease)}.btn:hover [data-i="arrow"]{transform:translateX(3px)}
-.btn:focus-visible,.chip:focus-visible,.nav button:focus-visible,.tile:focus-visible{outline:2px solid var(--g);outline-offset:2px}
-
-/* panels */
-.card{position:relative;isolation:isolate;background:linear-gradient(180deg,#f0faf4 0,#fff 120px);border:1px solid var(--ln);border-radius:6px;padding:16px;transition:border-color .25s var(--ease)}
-.card::before{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none;opacity:0;transition:opacity .4s var(--ease);background:radial-gradient(300px circle at var(--mx,50%) var(--my,50%),rgba(143,217,171,.22),rgba(143,217,171,0) 70%)}
-.card:hover::before{opacity:1}
-.card::after{content:"";position:absolute;left:16px;right:16px;top:-1px;height:2px;border-radius:0 0 2px 2px;background:linear-gradient(90deg,transparent,var(--g),transparent);transform:scaleX(0);transition:transform .5s var(--ease);pointer-events:none}
-.card:hover::after{transform:scaleX(1)}
-.ph{display:flex;align-items:center;gap:9px;font-weight:700;font-size:13.5px;color:var(--gh);margin-bottom:12px}
-.ph .sp{flex:1}.ph small{font-weight:500;color:var(--mut);font-size:12.5px}
-.phi{width:26px;height:26px;border-radius:6px;background:var(--tint);color:var(--g);align-items:center;justify-content:center}.phi .ico{width:16px;height:16px}
-.live{width:8px;height:8px;border-radius:50%;background:var(--g);margin:0 3px}
-#rc.busy .live{animation:pulse 1s ease-in-out infinite}
-@keyframes pulse{50%{opacity:.3}}
-.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--gh);background:var(--tint);border:1px solid var(--gl);border-radius:5px;padding:3px 10px;margin-bottom:16px}.badge .ico{width:14px;height:14px}
-.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:26px 0}
-.tile{text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .3s var(--ease),border-color .25s var(--ease)}
-.tile:hover{transform:translateY(-2px);border-color:var(--g)}
-.tile .ic{width:38px;height:38px;border-radius:6px;background:var(--tint);display:grid;place-items:center;margin-bottom:12px;color:var(--g);transition:background .25s var(--ease),color .25s var(--ease)}
-.tile .ic .ico{width:20px;height:20px}
-.tile:hover .ic{background:var(--g);color:#fff}.tile:hover .ic .ico{transform:scale(1.12) rotate(-6deg)}
-.tile b{display:block;margin-bottom:3px;color:var(--ink)}.tile span{color:var(--mut);font-size:14px}
-.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:start}
-@media(max-width:900px){.two{grid-template-columns:1fr}}
-textarea{width:100%;min-height:92px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--ln);border-radius:5px;padding:11px 12px;outline:0;transition:border-color .2s}
-textarea::placeholder{color:var(--mut)}
-textarea:focus{border-color:var(--g);outline:2px solid var(--gl);outline-offset:0}
-.chips{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}.chip{font:inherit;font-size:13px;border:1px solid var(--ln);background:var(--soft);color:var(--ink);border-radius:5px;padding:4px 10px;cursor:pointer;transition:background .2s,border-color .2s,color .2s;animation:up .4s var(--ease) both}.chip:hover{border-color:var(--g);background:var(--tint);color:var(--gh)}
+.btn.pri:hover{background:var(--gh)}
+.btn.sm{padding:4px 10px;font-size:13px}
+.card{background:#fff;border:1px solid var(--ln);border-radius:6px;padding:16px;margin-bottom:16px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:20px 0}
+.tile{text-align:left;font:inherit;color:inherit;cursor:pointer;border:1px solid var(--ln);border-radius:6px;padding:16px;background:#fff;transition:all .2s}
+.tile:hover{border-color:var(--g);transform:translateY(-2px)}
+.tile .ic{width:36px;height:36px;border-radius:6px;background:var(--tint);display:grid;place-items:center;margin-bottom:12px;color:var(--g)}
+textarea{width:100%;min-height:92px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--ln);border-radius:5px;padding:11px 12px;outline:0}
+textarea:focus{border-color:var(--g);box-shadow:0 0 0 3px var(--gl)}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.chip{font:inherit;font-size:13px;border:1px solid var(--ln);background:var(--soft);color:var(--ink);border-radius:5px;padding:4px 10px;cursor:pointer}
+.chip:hover{border-color:var(--g);background:var(--tint)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row .sp{flex:1}
-label.ck{display:flex;gap:7px;align-items:center;color:var(--mut);font-size:13px;cursor:pointer}label.ck input{accent-color:var(--g)}
-.prog{height:3px;border-radius:3px;background:var(--ln);overflow:hidden;margin-top:14px}
-.prog i{display:block;height:100%;width:0;background:var(--g);border-radius:3px;transition:width .3s var(--ease)}
-#steps{margin-top:12px;max-height:220px;overflow:auto;font-size:13.5px}#steps div{padding:3px 0;color:var(--mut);animation:up .3s var(--ease) both}#steps .ok{color:var(--g);font-weight:600}#steps .bad{color:var(--bad)}
+label.ck{display:flex;gap:7px;align-items:center;color:var(--mut);font-size:13px;cursor:pointer}
 
-/* result card */
-.stage{position:relative;border-radius:5px;overflow:hidden;background:linear-gradient(165deg,var(--tint),#fff 75%);border:1px solid var(--ln);cursor:grab;touch-action:none}
-.stage:active{cursor:grabbing}
-.stage canvas{display:block;width:100%;height:auto;aspect-ratio:4/3}
-#empty,#busy{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--mut);padding:20px;transition:opacity .35s;pointer-events:none}
-#busy{opacity:0;background:rgba(255,255,255,.75);color:var(--ink)}#rc.busy #busy{opacity:1}
-#busy::after{content:"";position:absolute;left:0;bottom:0;height:3px;width:40%;background:linear-gradient(90deg,transparent,var(--g),transparent);animation:slide 1.2s linear infinite}
-@keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
-#rc.in{animation:up .45s var(--ease) both}
-.bar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}.bar .sp{flex:1}
-
-/* parts */
-.side2{display:flex;flex-direction:column;gap:14px}
-.shapes{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px}.shapes .btn{flex-direction:column;gap:3px;padding:9px 0}.shapes .ico{width:22px;height:22px}.shapes .btn:hover .ico{transform:scale(1.12)}.shapes small{display:block;font-size:11px;color:var(--mut)}
-#plist{margin-top:12px;max-height:250px;overflow:auto}
-.pi{display:flex;align-items:center;gap:9px;width:100%;border:0;background:none;color:var(--ink);font:inherit;font-weight:500;padding:7px 8px;border-radius:5px;cursor:pointer;text-align:left;transition:background .15s}.pi:hover{background:var(--soft)}.pi.on{background:var(--tint)}.pi i{width:12px;height:12px;border-radius:3px;border:1px solid var(--ln);flex:none}
-.fld{margin:8px 0}.fld div{display:flex;justify-content:space-between;font-size:13px;color:var(--mut)}
-.fld input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:18px;background:transparent;cursor:pointer;margin:4px 0 0}
-.fld input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:var(--ln)}
-.fld input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--g);margin-top:-6px;transition:transform .15s var(--ease)}
-.hint{color:var(--mut);font-size:14px;padding:18px 4px;text-align:center}
-#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,16px);background:var(--ink);color:#fff;padding:9px 16px;border-radius:5px;border-left:3px solid var(--gl);opacity:0;transition:opacity .3s,transform .35s var(--ease);z-index:9;pointer-events:none;font-size:14px}#toast.show{opacity:1;transform:translate(-50%,0)}
-
-/* overview demo */
-.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:30px;align-items:center}
-.demo{padding:14px;display:flex;flex-direction:column;gap:10px;transition:opacity .5s}
-.d-prompt{display:flex;align-items:center;gap:8px;border:1px solid var(--ln);background:var(--soft);border-radius:5px;padding:8px 11px;font-size:14px;min-height:38px;color:var(--ink)}
-.d-prompt .ico{width:16px;height:16px;color:var(--g)}
-.d-line{display:inline-flex;align-items:center}
-.d-type{display:inline-block;overflow:hidden;white-space:nowrap;width:15ch}
-.d-caret{width:2px;height:16px;background:var(--g);margin-left:2px;animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
-.d-stage{border:1px solid var(--ln);border-radius:5px;background:radial-gradient(circle,rgba(23,138,76,.14) 1px,transparent 1.4px) 0 0/16px 16px,linear-gradient(165deg,var(--tint),#fff 75%);aspect-ratio:3/2}
-.d-stage svg{display:block;width:100%;height:100%}
-.gnd{stroke:var(--gl);stroke-width:2;stroke-linecap:round;fill:none}
-.wall{fill:#fff;stroke:var(--g);stroke-width:2}
-.roof{fill:var(--g);stroke:var(--g);stroke-width:4;stroke-linejoin:round}
-.door{fill:var(--tint);stroke:var(--g);stroke-width:2}
-.d-log{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:13px}
-.d-log li{display:flex;align-items:center;gap:6px;color:var(--mut)}
-.d-log .ico{width:14px;height:14px;color:var(--g)}
-.d-cap{display:flex;gap:6px;border-top:1px solid var(--ln);padding-top:10px}
-.d-cap span{flex:1;text-align:center;font-size:12.5px;font-weight:600;color:var(--gh);background:var(--tint);padding:4px 0;border-radius:4px}
-
-@media(max-width:900px){.hero{grid-template-columns:1fr}}
-@media(max-width:760px){body{display:block}
-.side{position:fixed;top:auto;bottom:0;left:0;right:0;width:auto;height:auto;flex-direction:row;padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px));border-right:0;border-top:1px solid var(--ln);background:#fff}
-.logo,.sfoot,.nav-ind{display:none}.nav{flex-direction:row;flex:1}.nav button{flex:1;flex-direction:column;gap:2px;font-size:11px;padding:6px 2px;text-align:center;align-items:center}.nav button.on{background:var(--tint)}
-main{padding:20px 16px 96px}#toast{bottom:90px}.ph small{display:none}}
-
-/* ═══ AI engine (5 tabs: Serper, Gemini, OpenRouter, Anthropic, OpenAI) ═══ */
-.eng{--mint:#8fe3a9;--on:#e9fbf1;--dim:#9bbfae;--edge:rgba(143,227,169,.2);position:relative;isolation:isolate;margin:0 0 22px;border-radius:10px;color:var(--on);background:radial-gradient(560px 280px at 0 0,rgba(63,191,127,.17),transparent 70%),radial-gradient(460px 240px at 100% 100%,rgba(39,196,216,.11),transparent 70%),linear-gradient(165deg,#0f2b20,#0a1b14);box-shadow:inset 0 0 0 1px var(--edge),0 22px 44px -26px rgba(15,42,32,.6)}
-.eng::before{content:"";position:absolute;inset:0;border-radius:inherit;z-index:0;pointer-events:none;background:radial-gradient(circle,rgba(143,227,169,.16) 1px,transparent 1.5px) 0 0/22px 22px;-webkit-mask-image:radial-gradient(ellipse 55% 80% at 100% 0,#000,transparent 75%);mask-image:radial-gradient(ellipse 55% 80% at 100% 0,#000,transparent 75%)}
-.eng-in{position:relative;z-index:1;padding:18px 20px 20px}
+/* AI Engine Box */
+.eng{background:linear-gradient(165deg,#0f2b20,#0a1b14);border-radius:10px;color:#e9fbf1;padding:20px;margin-bottom:22px;border:1px solid rgba(143,227,169,.2)}
 .eng-h{display:flex;align-items:center;gap:14px}
-.eng-ic{position:relative;width:38px;height:38px;border-radius:8px;display:grid;place-items:center;flex:none;background:rgba(143,227,169,.12);border:1px solid rgba(143,227,169,.28);color:var(--mint)}
-.eng-ic .ico{width:20px;height:20px}
-.eng-ic::after{content:"";position:absolute;right:-4px;top:-4px;width:10px;height:10px;border-radius:50%;background:#5f7b6d;border:2px solid #0f2b20;transition:background .3s,box-shadow .3s}
-.eng.lit .eng-ic::after{background:var(--mint);box-shadow:0 0 0 3px rgba(143,227,169,.2),0 0 10px var(--mint)}
-.eng-ht{flex:1;min-width:0}
-.eng-ht h3{margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em;color:#fff}
-.eng-ht p{margin:2px 0 0;font-size:14px;line-height:1.45;color:var(--dim)}
-.eng-ht p b{color:var(--on);font-weight:600}
-.eng code,.epill{font-family:inherit}
-.eng-ht code,.mt code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--mint)}
-.eng-ht code{background:rgba(143,227,169,.1);border-radius:4px;padding:1px 6px}
+.eng-ic{width:38px;height:38px;border-radius:8px;background:rgba(143,227,169,.12);border:1px solid rgba(143,227,169,.3);display:grid;place-items:center;color:#8fe3a9}
+.etabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:rgba(0,0,0,.3);padding:3px;border-radius:6px;margin:14px 0}
+.etabs button{background:none;border:0;color:#9bbfae;font:inherit;font-size:13px;font-weight:600;padding:8px;cursor:pointer;border-radius:4px;transition:all .2s}
+.etabs button[aria-checked=true],.etabs button:hover{background:rgba(143,227,169,.2);color:#fff}
+.eng input[type=password],.eng input[type=text]{width:100%;font:inherit;font-size:14px;color:#fff;background:rgba(0,0,0,.3);border:1px solid rgba(143,227,169,.3);border-radius:5px;padding:10px;outline:0}
+.eng input:focus{border-color:#8fe3a9}
+.emsg{min-height:20px;margin-top:8px;font-size:13px;color:#9bbfae}.emsg.ok{color:#8fe3a9}.emsg.bad{color:#ff9a94}
 
-.eb{display:inline-flex;align-items:center;justify-content:center;gap:7px;font:inherit;font-size:14px;font-weight:600;color:var(--on);background:rgba(255,255,255,.06);border:1px solid rgba(143,227,169,.26);border-radius:5px;padding:8px 14px;cursor:pointer;transition:background .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease),transform .15s var(--ease)}
-.eb:hover{border-color:var(--mint);background:rgba(143,227,169,.12)}
-.eb:active{transform:scale(.97)}.eb:disabled{opacity:.55;pointer-events:none}
-.eb.pri{background:var(--mint);border-color:var(--mint);color:#06261a}
-.eb.pri:hover{background:transparent;color:var(--mint)}
-.eb.ghost{background:none;border-color:transparent;color:var(--dim)}
-.eb.ghost:hover{color:var(--on);background:rgba(255,255,255,.07);border-color:transparent}
-.eb .ico{width:16px;height:16px}
-.eb:focus-visible,.eng input:focus-visible,.kget:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
-#eng-tg .ico{transition:transform .35s var(--ease);transform:rotate(180deg)}
-.eng.closed #eng-tg .ico{transform:none}
-.eng [hidden]{display:none!important}
+/* Viewport Stage */
+.two{display:grid;grid-template-columns:1fr 1.1fr;gap:18px}
+.stage{position:relative;border-radius:6px;overflow:hidden;background:linear-gradient(165deg,var(--tint),#fff);border:1px solid var(--ln)}
+.stage canvas{display:block;width:100%;height:auto;aspect-ratio:4/3}
+#empty,#busy{position:absolute;inset:0;display:grid;place-items:center;color:var(--mut);padding:20px;pointer-events:none}
+#busy{background:rgba(255,255,255,.8);opacity:0;transition:opacity .2s}#rc.busy #busy{opacity:1}
+.bar{display:flex;gap:6px;margin-top:10px;align-items:center}.bar .sp{flex:1}
 
-.eng-body{display:grid;grid-template-rows:1fr;transition:grid-template-rows .45s var(--ease)}
-.eng-body>div{min-height:0;overflow:hidden;visibility:visible;transition:visibility 0s}
-.eng.closed .eng-body{grid-template-rows:0fr}
-.eng.closed .eng-body>div{visibility:hidden;transition:visibility 0s .45s}
-.eng-grid{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:24px;margin-top:18px;padding-top:18px;border-top:1px solid rgba(143,227,169,.14)}
-.elab{display:block;font-size:13.5px;font-weight:600;color:var(--dim);margin:16px 0 0}
-.eng-l>.etabs+.elab{margin-top:16px}.eng-r>.elab:first-child{margin-top:0}
+/* Parts Panel */
+.shapes{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:10px 0}
+.shapes .btn{flex-direction:column;padding:8px 0;font-size:11px}
+#plist{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.pi{display:flex;align-items:center;gap:8px;width:100%;border:1px solid var(--ln);background:#fff;padding:6px 10px;border-radius:5px;cursor:pointer}
+.pi.on{background:var(--tint);border-color:var(--g)}
+.pi i{width:10px;height:10px;border-radius:3px}
+.fld{margin:8px 0}.fld div{display:flex;justify-content:space-y-1;font-size:12px;color:var(--mut)}
+.fld input[type=range]{width:100%}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:8px 16px;border-radius:5px;opacity:0;transition:all .3s;z-index:9;pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0)}
 
-.etabs{position:relative;display:grid;grid-template-columns:repeat(5,1fr);padding:3px;border-radius:6px;background:rgba(0,0,0,.28);border:1px solid rgba(143,227,169,.16)}
-.etabs i{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/5);border-radius:4px;background:rgba(143,227,169,.16);box-shadow:inset 0 0 0 1px rgba(143,227,169,.4);transition:transform .35s var(--ease)}
-.etabs button{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:5px;border:0;background:none;color:var(--dim);font:inherit;font-size:12.5px;font-weight:600;padding:8px 2px;cursor:pointer;border-radius:4px;transition:color .2s}
-.etabs button:hover,.etabs button[aria-checked=true]{color:#fff}
-.etabs button:focus-visible{outline:2px solid var(--mint);outline-offset:1px}
-.etabs .dt{width:7px;height:7px;border-radius:50%;border:1.5px solid #5f7b6d;flex:none;transition:background .3s,box-shadow .3s,border-color .3s}
-.etabs .cn .dt{background:var(--mint);border-color:var(--mint)}
-.etabs .u .dt{box-shadow:0 0 0 3px rgba(143,227,169,.22),0 0 8px var(--mint)}
-
-.kf{position:relative;margin-top:6px}
-.eng input[type=password],.eng input[type=text]{width:100%;font:inherit;font-size:14.5px;color:var(--on);background:rgba(0,0,0,.28);border:1px solid rgba(143,227,169,.22);border-radius:5px;padding:10px 12px;outline:0;transition:border-color .2s,box-shadow .2s}
-.eng #key{padding-right:46px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;letter-spacing:.03em}
-.eng input::placeholder{color:#6f917f}
-.eng input[type=password]:focus,.eng input[type=text]:focus{border-color:var(--mint);box-shadow:0 0 0 3px rgba(143,227,169,.18)}
-.kf .eb{position:absolute;right:4px;top:4px;bottom:4px;padding:0 9px}
-.krow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:10px}
-.kget{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:13.5px;color:var(--mint);text-decoration:none;border-bottom:1px solid rgba(143,227,169,.35);transition:border-color .2s}
-.kget:hover{border-bottom-color:var(--mint)}.kget .ico{width:14px;height:14px}
-.emsg{min-height:21px;margin:10px 0 0;font-size:13.5px;color:var(--dim)}
-.emsg.ok{color:var(--mint)}.emsg.bad{color:#ff9a94}
-.eck{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:13.5px;color:var(--dim);cursor:pointer}
-.eck input{accent-color:#8fe3a9;width:16px;height:16px;margin:0}
-.enote{font-size:12.5px;line-height:1.5;color:var(--dim);margin:8px 0 0;max-width:46ch}
-
-.mlist{display:flex;flex-direction:column;gap:6px;max-height:200px;overflow:auto;padding:2px 4px 2px 2px;margin-top:6px;scrollbar-width:thin;scrollbar-color:rgba(143,227,169,.35) transparent}
-.mr{position:relative;display:flex;align-items:center;gap:11px;padding:9px 12px;border:1px solid rgba(143,227,169,.16);border-radius:6px;background:rgba(255,255,255,.03);cursor:pointer;transition:border-color .2s,background .2s,box-shadow .3s}
-.mr:hover{border-color:rgba(143,227,169,.5);background:rgba(143,227,169,.07)}
-.mr input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
-.mr:focus-within{outline:2px solid var(--mint);outline-offset:2px}
-.mr.on{border-color:var(--mint);background:rgba(143,227,169,.12);box-shadow:0 0 0 1px rgba(143,227,169,.3),0 0 18px -6px rgba(143,227,169,.65)}
-.rd{width:16px;height:16px;border-radius:50%;border:1.5px solid #5f7b6d;flex:none;display:grid;place-items:center;transition:border-color .2s}
-.mr.on .rd{border-color:var(--mint)}.mr.on .rd::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--mint)}
-.mt{flex:1;min-width:0;display:flex;flex-direction:column}
-.mt b{font-weight:600;font-size:14.5px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mt code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mr em{font-style:normal;font-size:12px;font-weight:600;color:var(--mint);background:rgba(143,227,169,.12);border-radius:4px;padding:2px 8px;flex:none}
-.mcus{margin-top:10px}.mcus .elab{margin:0 0 6px}
-
-.epill{display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:290px;font-size:12.5px;font-weight:500;color:var(--gh);background:var(--tint);border:1px solid var(--gl);border-radius:5px;padding:3px 10px;cursor:pointer;transition:background .2s,border-color .2s}
-.epill:hover{background:var(--soft);border-color:var(--g)}
-.epill i{width:7px;height:7px;border-radius:50%;background:var(--g);flex:none}
-.epill b{font-weight:700}
-.epill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.epill.off{color:var(--mut);background:#fff;border-color:var(--ln)}.epill.off i{background:none;border:1.5px solid var(--mut)}
-
-@media(max-width:900px){.eng-grid{grid-template-columns:1fr}}
-@media(max-width:520px){.eng-in{padding:16px 14px 16px}.kget{margin-left:0}.eng-ht p{font-size:13.5px}}
+@media(max-width:900px){.two{grid-template-columns:1fr}}
+@media(max-width:760px){
+ body{display:block}
+ .side{position:fixed;bottom:0;left:0;right:0;width:auto;height:auto;flex-direction:row;padding:8px;border-top:1px solid var(--ln);z-index:10}
+ .logo,.sfoot{display:none}
+ .nav{flex-direction:row;flex:1}
+ .nav button{flex:1;flex-direction:column;font-size:10px;padding:4px;text-align:center}
+ main{padding:16px 16px 80px}
+}
 </style></head><body>
-<div class="blob b1"></div><div class="blob b2"></div>
-<div id="bg" data-page="overview" aria-hidden="true">
- <div class="bg-mesh"></div>
- <div class="bg-iso a"></div><div class="bg-iso b"></div>
- <div class="bg-dots"></div>
- <svg class="bg-topo" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice"></svg>
- <div class="sh" style="--lf:.04;--tp:.15;--w:92px;--d:10;--dl:-3s"><svg viewBox="0 0 100 100"><path d="M50 8L88 29V71L50 92L12 71V29Z"/><path d="M50 50L12 29M50 50L88 29M50 50V92"/><rect class="h" x="47.5" y="5.5" width="5" height="5"/><rect class="h" x="85.5" y="26.5" width="5" height="5"/><rect class="h" x="9.5" y="26.5" width="5" height="5"/><circle class="dot" cx="50" cy="50" r="1.8"/></svg></div>
- <div class="sh" style="--lf:.94;--tp:.34;--w:78px;--d:-14;--dl:-9s"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/><ellipse cx="50" cy="50" rx="40" ry="14"/><ellipse class="dash" cx="50" cy="50" rx="14" ry="40"/><circle class="dot" cx="50" cy="50" r="1.8"/></svg></div>
- <div class="sh" style="--lf:.06;--tp:.7;--w:104px;--d:16;--dl:-6s"><svg viewBox="0 0 100 100"><path d="M50 10L84 78A34 12 0 0 1 16 78Z"/><path class="dash" d="M16 78A34 12 0 0 0 84 78"/><path class="dash" d="M50 10V78"/><circle class="dot" cx="50" cy="78" r="1.8"/></svg></div>
- <div class="bg-grain"></div><div class="bg-vig"></div>
- <div class="bg-ruler t"></div><div class="bg-ruler r"></div>
- <svg class="bg-gizmo" viewBox="0 0 64 64"><g fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M32 38V13" stroke="#178a4c"/><path d="M32 38L53 49" stroke="#0f6b3a"/><path d="M32 38L11 49" stroke="#a9dcbd"/></g><circle cx="32" cy="38" r="2.4" fill="#178a4c"/><g fill="#fff" stroke-width="1.2" font-family="ui-monospace,monospace" font-size="6.5" text-anchor="middle"><circle cx="32" cy="8" r="5" stroke="#178a4c"/><circle cx="57" cy="51" r="5" stroke="#0f6b3a"/><circle cx="7" cy="51" r="5" stroke="#a9dcbd"/><text x="32" y="10.3" fill="#178a4c" stroke="none">Y</text><text x="57" y="53.3" fill="#0f6b3a" stroke="none">X</text><text x="7" y="53.3" fill="#4a6458" stroke="none">Z</text></g></svg>
- <div class="bg-coords" id="coords">x 0 · y 0</div>
-</div>
-<aside class="side"><div class="logo" data-go="overview"><i data-i="parts"></i>Verdant 3D</div>
-<div class="nav"><i class="nav-ind n"></i><button data-go="overview"><span data-i="home"></span>Overview</button><button data-go="ai" class="on"><span data-i="ai"></span>AI Builder</button><button data-go="parts"><span data-i="parts"></span>Parts</button><button data-go="library"><span data-i="library"></span>Library</button><button data-go="pricing"><span data-i="pricing"></span>Pricing</button></div>
-<div class="sfoot">Current model<br><b id="cnt">0 parts</b><div class="meter" title="Model size"><i id="meter"></i></div><button class="btn pri sm" data-go="pricing" style="margin-top:10px;width:100%">Upgrade</button></div></aside>
+<div class="blob b1"></div>
+<aside class="side">
+ <div class="logo" data-go="overview"><i>◆</i>Verdant 3D</div>
+ <div class="nav">
+  <button data-go="overview"><span class="ico">🏠</span>Overview</button>
+  <button data-go="ai" class="on"><span class="ico">✨</span>AI Builder</button>
+  <button data-go="parts"><span class="ico">🧊</span>Parts</button>
+  <button data-go="library"><span class="ico">📚</span>Library</button>
+ </div>
+ <div class="sfoot">Model<br><b id="cnt">0 parts</b><div class="meter"><i id="meter"></i></div></div>
+</aside>
 
 <main>
-<section class="page" id="p-overview"><div class="stag">
-<div class="hero"><div><span class="badge"><span data-i="ai"></span>AI-powered 3D modeling</span><h1>Build 3D models,<br><em>simply.</em></h1><p class="sub">Describe what you want and AI builds it. Then fine-tune every part yourself.</p>
-<div class="row"><button class="btn pri" data-go="ai">Start with AI<span data-i="arrow"></span></button><button class="btn" data-go="library">Browse the library</button></div></div>
-<div class="card demo" id="demo">
- <div class="d-prompt"><span data-i="ai"></span><span class="d-line"><span class="d-type">A cozy cottage</span><span class="d-caret"></span></span></div>
- <div class="d-stage"><svg viewBox="0 0 240 160" aria-hidden="true">
-  <path class="gnd" d="M24 138h192"/>
-  <rect class="wall" x="62" y="76" width="116" height="62" rx="5"/>
-  <path class="roof" d="M52 80L120 28l68 52z"/>
-  <rect class="door" x="108" y="102" width="24" height="36" rx="3"/>
- </svg></div>
- <ul class="d-log"><li class="l1"><span data-i="check"></span>Added Wall</li><li class="l2"><span data-i="check"></span>Added Roof</li><li class="l3"><span data-i="check"></span>Added Door</li><li class="l4"><span data-i="check"></span>Resized Roof</li></ul>
- <div class="d-cap"><span class="c1">1 · Describe</span><span class="c2">2 · AI builds</span><span class="c3">3 · Adjust</span></div>
-</div></div>
-<div class="grid3 stag">
-<button class="card tile" data-go="ai"><div class="ic" data-i="ai"></div><b>AI Builder</b><span>Type a description and watch your model come together.</span></button>
-<button class="card tile" data-go="parts"><div class="ic" data-i="parts"></div><b>Parts</b><span>Add shapes and adjust size, position, color and edge smoothness.</span></button>
-<button class="card tile" data-go="library"><div class="ic" data-i="library"></div><b>Library</b><span>Start from ready-made models and make them yours.</span></button></div>
-</div></section>
-
-<section class="page on" id="p-ai"><h2>AI Builder</h2><p class="sub">Describe a model — Serper researches what it looks like on the web and your chosen AI (Gemini, OpenRouter, Anthropic, or OpenAI) builds it part by part.</p>
-
-<section class="eng" id="eng" aria-labelledby="eng-t">
- <div class="eng-in">
-  <div class="eng-h">
-   <span class="eng-ic" data-i="ai"></span>
-   <div class="eng-ht"><h3 id="eng-t">AI Engine + Serper Web Search</h3><p id="eng-s">Configure your AI provider and Serper web research keys below.</p></div>
-   <button class="eb" id="eng-tg" type="button" aria-expanded="true" aria-controls="eng-b"><span id="eng-tgl">Hide</span><span data-i="chev"></span></button>
+ <section class="page" id="p-overview">
+  <h1>Build 3D models,<br><em>simply.</em></h1>
+  <p class="sub">Describe what you want and AI builds it. Fine-tune every block instantly.</p>
+  <div class="grid3">
+   <button class="tile" data-go="ai"><div class="ic">✨</div><b>AI Builder</b><span>Type a description &amp; watch models build.</span></button>
+   <button class="tile" data-go="parts"><div class="ic">🧊</div><b>Parts Editor</b><span>Adjust dimensions, position &amp; colors.</span></button>
+   <button class="tile" data-go="library"><div class="ic">📚</div><b>Library</b><span>Pick ready-made templates.</span></button>
   </div>
-  <div class="eng-body" id="eng-b"><div>
-   <div class="eng-grid">
-    <div class="eng-l">
-     <div class="etabs" id="etabs" role="radiogroup" aria-label="AI provider"><i></i></div>
-     <label class="elab" id="klab" for="key">API key</label>
-     <div class="kf"><input id="key" type="password" autocomplete="new-password" placeholder="Paste your key"><button class="eb ghost" id="kshow" type="button" title="Show/Hide Key"><span data-i="eye"></span></button></div>
-     <div class="krow"><button class="eb pri" id="kgo" type="button">Test &amp; Connect</button><button class="eb" id="kuse" type="button" hidden>Set Active AI</button><button class="eb ghost" id="kdel" type="button" hidden>Remove key</button><a class="kget" id="kget" href="#" target="_blank" rel="noopener noreferrer"></a></div>
-     <p class="emsg" id="emsg"></p>
-     <label class="eck"><input type="checkbox" id="kkeep" checked>Keep keys on this device</label>
-     <p class="enote" id="enote"></p>
-    </div>
-    <div class="eng-r">
-     <div class="elab" id="mlab">Model / Search Mode</div>
-     <div class="mlist" id="mlist" role="radiogroup"></div>
-     <div class="mcus" id="mcus-wrap">
-      <label class="elab" for="mcus">Or custom Model ID (e.g. gemini-2.5-flash or openrouter model)</label>
-      <input id="mcus" type="text" placeholder="Optional custom model ID…">
-     </div>
+ </section>
+
+ <section class="page on" id="p-ai">
+  <h2>AI Builder</h2>
+  <p class="sub">Serper researches real-world structure, and your active AI builds it part-by-part.</p>
+  
+  <div class="eng">
+   <div class="eng-h">
+    <div class="eng-ic">✨</div>
+    <div style="flex:1">
+     <h3 style="margin:0;font-size:16px">AI Engine + Serper Search</h3>
+     <p style="margin:2px 0 0;font-size:13px;color:#9bbfae" id="eng-s">Configure your preferred provider</p>
     </div>
    </div>
-  </div></div>
- </div>
-</section>
-<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button"></button></div><textarea id="prompt" placeholder="For example: a red sports car, a futuristic hoverbike, or a clean tree"></textarea>
-<div class="chips" id="chips"></div>
-<div class="row"><label class="ck"><input type="checkbox" id="keep">Add to current model</label><label class="ck"><input type="checkbox" id="use-serper" checked>Use Serper web search</label><span class="sp"></span><button class="btn pri" id="build">Build with AI</button></div>
-<div class="prog" id="prog"><i></i></div>
-<div id="steps"></div></div><div id="slot-ai"></div></div></section>
+   <div class="etabs" id="etabs" role="tablist"></div>
+   <div style="margin-top:10px">
+    <label style="font-size:13px;color:#9bbfae" id="klab">API Key</label>
+    <div style="display:flex;gap:8px;margin-top:4px">
+     <input id="key" type="password" placeholder="Paste API Key…">
+     <button class="btn pri" id="kgo" type="button" style="white-space:nowrap">Connect</button>
+    </div>
+    <p class="emsg" id="emsg"></p>
+   </div>
+  </div>
 
-<section class="page" id="p-parts"><h2>Parts</h2><p class="sub">Add shapes, then select a part to change it.</p>
-<div class="two"><div class="side2"><div class="card"><div class="ph"><span class="phi" data-i="parts"></span>Add a part</div><div class="shapes" id="shapes"></div>
-<div id="plist"></div><div class="row" style="margin-top:10px"><button class="btn sm" id="undo"><span data-i="undo"></span>Undo</button><button class="btn sm" id="clear">Clear all</button></div></div>
-<div class="card" id="insp"><div class="hint">Select a part above to inspect and edit its size or color.</div></div></div><div id="slot-parts"></div></div></section>
+  <div class="two">
+   <div class="card">
+    <div style="font-weight:700;color:var(--gh);margin-bottom:8px">Describe your model</div>
+    <textarea id="prompt" placeholder="e.g. a red sports car, medieval castle tower, or futuristic hoverbike"></textarea>
+    <div class="chips" id="chips"></div>
+    <div class="row">
+     <label class="ck"><input type="checkbox" id="keep">Add to current model</label>
+     <label class="ck"><input type="checkbox" id="use-serper" checked>Serper Search</label>
+     <span class="sp"></span>
+     <button class="btn pri" id="build">Build with AI</button>
+    </div>
+    <div style="height:3px;background:var(--ln);border-radius:3px;margin-top:14px;overflow:hidden"><i id="prog" style="display:block;height:100%;width:0;background:var(--g);transition:width .3s"></i></div>
+    <div id="steps" style="margin-top:10px;font-size:13px;max-height:160px;overflow:auto"></div>
+   </div>
+   <div id="slot-ai"></div>
+  </div>
+ </section>
 
-<section class="page" id="p-library"><h2>Library</h2><p class="sub">Pick a ready-made model.</p><div class="grid3 stag" id="lib"></div></section>
-<section class="page" id="p-pricing"><div><h2>Simple pricing</h2><p class="sub">Bring your own API keys for unlimited builds with Gemini, OpenRouter, Anthropic, OpenAI, and Serper.</p></div></section>
+ <section class="page" id="p-parts">
+  <h2>Parts Inspector</h2>
+  <p class="sub">Add individual shapes or select a part to customize.</p>
+  <div class="two">
+   <div class="card">
+    <div style="font-weight:700;color:var(--gh);margin-bottom:6px">Add shape</div>
+    <div class="shapes" id="shapes"></div>
+    <div id="plist"></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" id="undo">Undo</button><button class="btn sm" id="clear">Clear All</button></div>
+    <div id="insp" style="margin-top:14px"></div>
+   </div>
+   <div id="slot-parts"></div>
+  </div>
+ </section>
+
+ <section class="page" id="p-library">
+  <h2>Library</h2>
+  <p class="sub">Pick a pre-built Roblox model.</p>
+  <div class="grid3" id="lib"></div>
+ </section>
 </main>
 
 <div id="park" hidden>
-<div class="card" id="rc"><div class="ph"><span class="live"></span>Live preview<span class="sp"></span><small>Drag to rotate · Scroll to zoom</small></div><div class="stage" id="stage"><canvas id="out" width="960" height="720"></canvas><div id="empty">Your model will appear here.</div><div id="busy">The AI is modeling…</div></div>
+<div class="card" id="rc" style="margin:0"><div style="font-weight:700;color:var(--gh);margin-bottom:8px;display:flex;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block;margin-right:6px"></span>3D Preview <span class="sp"></span><small style="color:var(--mut);font-weight:normal">Drag to rotate</small></div>
+<div class="stage" id="stage"><canvas id="out" width="960" height="720"></canvas><div id="empty">Your 3D model appears here.</div><div id="busy">AI is modeling…</div></div>
 <div class="bar"><button class="btn sm" data-v="0,.12">Front</button><button class="btn sm" data-v="1.5708,.12">Side</button><button class="btn sm" data-v="0,1.4">Top</button><button class="btn sm" data-v=".8,.45">3/4</button><span class="sp"></span><button class="btn sm on" id="spin">Turntable</button></div></div>
 </div>
 <div id="toast"></div>
@@ -360,68 +186,38 @@ main{padding:20px 16px 96px}#toast{bottom:90px}.ph small{display:none}}
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const nf=(v,d=0)=>Number.isFinite(+v)?+v:d,vec=(a,d)=>[0,1,2].map(i=>Math.max(-12,Math.min(12,nf(a&&a[i],d[i])))),dim=a=>[0,1,2].map(i=>Math.max(.05,Math.min(8,nf(a&&a[i],1)))),hex=c=>/^#[0-9a-f]{6}$/i.test(c)?c:'#8be0a4',rad=a=>vec(a,[0,0,0]).map(d=>d*Math.PI/180);
+const hex=c=>/^#[0-9a-f]{6}$/i.test(c)?c:'#8be0a4';
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2300)}
-
-const IC={
- home:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
- ai:'<path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
- parts:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
- library:'<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
- pricing:'<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
- arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
- box:'<rect x="5" y="5" width="14" height="14" rx="3"/>',
- sphere:'<circle cx="12" cy="12" r="8"/>',
- cylinder:'<ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6"/>',
- cone:'<path d="M12 4l8 15H4z"/>',
- torus:'<ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="3.5" ry="1.8"/>',
- undo:'<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>',
- check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
- chev:'<path d="M6 9l6 6 6-6"/>',
- eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
- ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/>'};
-const ico=n=>'<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(IC[n]||'')+'</svg>';
-$$('[data-i]').forEach(e=>e.innerHTML=ico(e.dataset.i));
-
-const BG=$('#bg'),CO=$('#coords');
-window.addEventListener('pointermove',e=>{
- const x=(e.clientX/ innerWidth-.5)*2,y=(e.clientY/innerHeight-.5)*2;
- BG.style.setProperty('--px',x.toFixed(3));BG.style.setProperty('--py',y.toFixed(3));
- if(CO)CO.textContent=`x ${Math.round(e.clientX)} · y ${Math.round(e.clientY)}`;
-});
 
 const R=new THREE.WebGLRenderer({antialias:true,alpha:true});R.setSize(960,720);
 const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,4/3,.1,200),world=new THREE.Group();scene.add(world);
 scene.add(new THREE.HemisphereLight(0xffffff,0x9fe8c0,1));const sun=new THREE.DirectionalLight(0xffffff,.85);sun.position.set(5,9,6);scene.add(sun);
 const floor=new THREE.Mesh(new THREE.CircleGeometry(4.5,48),new THREE.MeshBasicMaterial({color:0x8fe3a9,transparent:true,opacity:.28}));floor.rotation.x=-Math.PI/2;scene.add(floor);
-const parts=new Map(),view={az:.8,el:.45,d:7,tx:0,ty:.8,tz:0,gd:7,gx:0,gy:.8,gz:0};let spin=true,sel=null;
+const parts=new Map(),view={az:.8,el:.45,d:7,tx:0,ty:.8,tz:0,gd:7};let spin=true,sel=null;
 
 function geo(u){const{k,w,h,z,s}=u,seg=Math.round(8+s*40);let g;
- if(k=='box'){const r=s*Math.min(w,h,z)/2*.98,a=new THREE.Vector3(w/2-r,h/2-r,z/2-r),na=a.clone().negate();g=new THREE.BoxGeometry(w,h,z,6,6,6);
-  const p=g.attributes.position,n=g.attributes.normal,v=new THREE.Vector3(),c=new THREE.Vector3();
-  for(let i=0;i<p.count;i++){v.fromBufferAttribute(p,i);c.copy(v).clamp(na,a);v.sub(c).normalize();if(r>0)n.setXYZ(i,v.x,v.y,v.z);p.setXYZ(i,c.x+v.x*r,c.y+v.y*r,c.z+v.z*r)}return g}
+ if(k=='box'){g=new THREE.BoxGeometry(w,h,z);return g}
  g=k=='sphere'?new THREE.SphereGeometry(.5,seg,seg>>1):k=='cylinder'?new THREE.CylinderGeometry(.5,.5,1,seg):k=='cone'?new THREE.ConeGeometry(.5,1,seg):new THREE.TorusGeometry(.32,.15,12,seg);
  g.scale(w,h,z);return g}
-function rebuild(m){const u=m.userData.u;m.geometry.dispose();m.geometry=geo(u);m.material.flatShading=u.s<.15;m.material.needsUpdate=true}
-function mk(u,p,r,quiet){const m=new THREE.Mesh(geo(u),new THREE.MeshStandardMaterial({color:u.c,roughness:.45,metalness:.05}));
+function mk(u,p,r,quiet){const m=new THREE.Mesh(geo(u),new THREE.MeshStandardMaterial({color:u.c,roughness:.45}));
  m.userData={u,pop:quiet?1:0};m.position.fromArray(p);if(r)m.rotation.set(...r);m.scale.setScalar(quiet?1:.01);world.add(m);return m}
 function wipe(){parts.forEach(m=>{world.remove(m);m.geometry.dispose();m.material.dispose()});parts.clear();sel=null;renderPartsList()}
-const SH=['box','sphere','cylinder','cone','torus'];
-function normShape(s){s=String(s||'box').toLowerCase();return SH.includes(s)?s:'box'}
-function uniq(id){id=String(id||'part').slice(0,40);const b=id;let i=2;while(parts.has(id))id=b+' '+i++;return id}
-function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.02))),c:hex(o.color)};
- const id=uniq(o.id||o.name||sh),m=mk(u,vec(o.pos||o.position,[0,s[1]/2,0]),(o.rot||o.rotation)?rad(o.rot||o.rotation):null,quiet);parts.set(id,m);return id}
-function apply(o){const op=String(o.op||'add').toLowerCase();if(op=='clear'){wipe();return'Cleared'}if(op=='add')return'Added '+addPart(o);}
-function fit(){const b=new THREE.Box3().setFromObject(world);if(b.isEmpty())return;const c=b.getCenter(new THREE.Vector3());Object.assign(view,{gx:c.x,gy:c.y,gz:c.z,gd:Math.max(5,b.getSize(new THREE.Vector3()).length()*1.7)})}
+function addPart(o,quiet){
+ const s=[0.5,0.5,0.5].map((d,i)=>Math.max(0.05,Math.min(8,Number(o.size?.[i]||d))));
+ const sh=['box','sphere','cylinder','cone','torus'].includes(o.shape)?o.shape:'box';
+ const u={k:sh,w:s[0],h:s[1],z:s[2],s:0.02,c:hex(o.color)};
+ const id=(o.id||sh)+'_'+Math.random().toString(36).slice(2,6);
+ const m=mk(u,[0,s[1]/2,0],null,quiet);parts.set(id,m);return id
+}
+function fit(){const b=new THREE.Box3().setFromObject(world);if(b.isEmpty())return;const c=b.getCenter(new THREE.Vector3());view.gd=Math.max(5,b.getSize(new THREE.Vector3()).length()*1.7)}
 
 const ctx=$('#out').getContext('2d');
 (function loop(){requestAnimationFrame(loop);if(spin)view.az+=.004;
- ['d','tx','ty','tz'].forEach((k,i)=>view[k]+=(view[['gd','gx','gy','gz'][i]]-view[k])*.07);
- parts.forEach(m=>{const d=m.userData;if(d.pop<1){d.pop=Math.min(1,d.pop+.07);const t=d.pop-1;m.scale.setScalar(Math.max(.01,1+2.70158*t*t*t+1.70158*t*t))}});
- const ce=Math.cos(view.el);cam.position.set(view.tx+Math.sin(view.az)*ce*view.d,view.ty+Math.sin(view.el)*view.d,view.tz+Math.cos(view.az)*ce*view.d);cam.lookAt(view.tx,view.ty,view.tz);
- R.render(scene,cam);ctx.clearRect(0,0,960,720);ctx.drawImage(R.domElement,0,0)})();
+ view.d+=(view.gd-view.d)*.07;
+ parts.forEach(m=>{if(m.userData.pop<1)m.userData.pop=Math.min(1,m.userData.pop+.07)});
+ const ce=Math.cos(view.el);cam.position.set(view.tx+Math.sin(view.az)*ce*view.d,view.ty+Math.sin(view.el)*view.d,view.tz+Math.cos(view.az)*ce*view.d);
+ cam.lookAt(view.tx,view.ty,view.tz);R.render(scene,cam);ctx.clearRect(0,0,960,720);ctx.drawImage(R.domElement,0,0)})();
 
-// Interactive camera controls
 const stg=$('#stage');let drag=null; stg.onpointerdown=e=>{drag={x:e.clientX,y:e.clientY,az:view.az,el:view.el};stg.setPointerCapture(e.pointerId)}; stg.onpointermove=e=>{if(!drag)return;view.az=drag.az-(e.clientX-drag.x)*.008;view.el=Math.max(-.2,Math.min(1.45,drag.el+(e.clientY-drag.y)*.008))}; stg.onpointerup=()=>drag=null; stg.onwheel=e=>{e.preventDefault();view.gd=Math.max(2.5,Math.min(28,view.gd+e.deltaY*.006))}; $$('[data-v]').forEach(b=>b.onclick=()=>{const[a,e]=b.dataset.v.split(',').map(Number);view.az=a;view.el=e});$('#spin').onclick=e=>{spin=!spin;e.currentTarget.classList.toggle('on',spin)};
 
 function renderPartsList(){
@@ -429,334 +225,121 @@ function renderPartsList(){
  parts.forEach((m,id)=>{
   const b=document.createElement('button');b.className='pi'+(sel===id?' on':'');
   b.innerHTML=`<i style="background:${m.userData.u.c}"></i><span>${id}</span>`;
-  b.onclick=()=>{sel=id;renderPartsList();renderInspector()};
-  pl.appendChild(b);
+  b.onclick=()=>{sel=id;renderPartsList()};pl.appendChild(b);
  });
 }
-function renderInspector(){
- const box=$('#insp');if(!box)return;
- if(!sel||!parts.has(sel)){box.innerHTML='<div class="hint">Select a part above to inspect and edit its size or color.</div>';return}
- const m=parts.get(sel),u=m.userData.u;
- box.innerHTML=`<div class="ph"><span>Edit: ${sel}</span><span class="sp"></span><input type="color" id="iclr" value="${u.c}"></div>
-  <div class="fld"><div><span>Width (X)</span><b id="vw">${u.w.toFixed(2)}</b></div><input type="range" id="rw" min="0.1" max="6" step="0.05" value="${u.w}"></div>
-  <div class="fld"><div><span>Height (Y)</span><b id="vh">${u.h.toFixed(2)}</b></div><input type="range" id="rh" min="0.1" max="6" step="0.05" value="${u.h}"></div>
-  <div class="fld"><div><span>Depth (Z)</span><b id="vz">${u.z.toFixed(2)}</b></div><input type="range" id="rz" min="0.1" max="6" step="0.05" value="${u.z}"></div>`;
- $('#iclr').oninput=e=>{u.c=e.target.value;m.material.color.set(u.c);renderPartsList()};
- ['w','h','z'].forEach(k=>{
-  $('#r'+k).oninput=e=>{u[k]=+e.target.value;$('#v'+k).textContent=u[k].toFixed(2);rebuild(m)};
- });
-}
+function refresh(){$('#cnt').textContent=parts.size+' parts';$('#meter').style.width=Math.min(100,parts.size/50*100)+'\%';$('#empty').style.opacity=parts.size?0:1;renderPartsList()}
+[['box','Box'],['sphere','Ball'],['cylinder','Tube'],['cone','Cone'],['torus','Ring']].forEach(([k,l])=>{
+ const b=document.createElement('button');b.className='btn sm';b.textContent=l;
+ b.onclick=()=>{addPart({shape:k,size:[1,1,1]});fit();refresh()};$('#shapes').appendChild(b)
+});
+$('#clear').onclick=()=>{wipe();fit();refresh()};
+$('#undo').onclick=()=>{const keys=[...parts.keys()];if(!keys.length)return;const last=keys[keys.length-1],m=parts.get(last);world.remove(m);parts.delete(last);fit();refresh()};
 
-function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/50*100)+'\%';$('#empty').style.opacity=n?0:1;renderPartsList()}
-[['box','Box'],['sphere','Ball'],['cylinder','Tube'],['cone','Cone'],['torus','Donut']].forEach(([k,l])=>{const b=document.createElement('button');b.className='btn';b.innerHTML=ico(k)+'<small>'+l+'</small>';
- b.onclick=()=>{sel=addPart({shape:k,size:[1,1,1],pos:[0,.5,0]});fit();refresh();renderInspector()};$('#shapes').appendChild(b)});
-$('#clear').onclick=()=>{wipe();fit();refresh();renderInspector()};
-$('#undo').onclick=()=>{const keys=[...parts.keys()];if(!keys.length)return;const last=keys[keys.length-1],m=parts.get(last);world.remove(m);m.geometry.dispose();m.material.dispose();parts.delete(last);if(sel===last)sel=null;fit();refresh();renderInspector()};
-
-/* ═══ Providers Configuration: Serper + Gemini + OpenRouter + Anthropic + OpenAI ═══ */
+// Provider Config Setup
 const PV={
- serper:{
-  name:'Serper',
-  get:'https://serper.dev/api-key',
-  ph:'Paste Serper.dev API key…',
-  note:'Serper researches real-world proportions, anatomy, and colors on Google before the AI builds your 3D model.',
-  def:'serper-web-5',
-  fb:[['serper-web-5','Serper Google Search','Web Grounding']]
- },
- gemini:{
-  name:'Gemini',
-  get:'https://aistudio.google.com/app/apikey',
-  ph:'AIzaSy…',
-  note:'Supports Gemini 2.5 Flash, Gemini 2.5 Pro, and 2.5 Flash-Lite without rejecting older 2.5 API strings.',
-  def:'gemini-2.5-flash',
-  fb:[
-   ['gemini-2.5-flash','Gemini 2.5 Flash','Recommended'],
-   ['gemini-2.5-pro','Gemini 2.5 Pro','Deep Reasoning'],
-   ['gemini-2.5-flash-lite','Gemini 2.5 Flash-Lite','Fastest'],
-   ['gemini-2.0-flash','Gemini 2.0 Flash','Legacy 2.0']
-  ]
- },
- openrouter:{
-  name:'OpenRouter',
-  get:'https://openrouter.ai/keys',
-  ph:'sk-or-v1-…',
-  note:'OpenRouter lets you test any AI model (Gemini, Claude, GPT, DeepSeek, Llama, Qwen) with a single API key.',
-  def:'google/gemini-2.5-flash',
-  fb:[
-   ['google/gemini-2.5-flash','Gemini 2.5 Flash (OpenRouter)','Fast & Crisp'],
-   ['anthropic/claude-sonnet-4','Claude Sonnet 4 (OpenRouter)','Top Sculptor'],
-   ['openai/gpt-4o','GPT-4o (OpenRouter)','Balanced'],
-   ['deepseek/deepseek-chat-v3-0324','DeepSeek V3 (OpenRouter)','Value']
-  ]
- },
- anthropic:{
-  name:'Anthropic',
-  get:'https://console.anthropic.com/settings/keys',
-  ph:'sk-ant-…',
-  note:'Direct Anthropic API connection for Claude 4 Sonnet and Claude 3.7 Sonnet spatial modeling.',
-  def:'claude-sonnet-4-20250514',
-  fb:[
-   ['claude-sonnet-4-20250514','Claude Sonnet 4','Recommended'],
-   ['claude-3-7-sonnet-latest','Claude 3.7 Sonnet','Extended']
-  ]
- },
- openai:{
-  name:'OpenAI',
-  get:'https://platform.openai.com/api-keys',
-  ph:'sk-…',
-  note:'Direct OpenAI API connection for GPT-4o and GPT-4.1 structured JSON 3D generation.',
-  def:'gpt-4o',
-  fb:[
-   ['gpt-4o','GPT-4o','Flagship'],
-   ['gpt-4.1','GPT-4.1','Precision'],
-   ['gpt-4o-mini','GPT-4o Mini','Fast']
-  ]
- }
+ gemini:{name:'Gemini',ph:'AIzaSy…',def:'gemini-2.5-flash'},
+ openai:{name:'OpenAI',ph:'sk-…',def:'gpt-4o-mini'},
+ anthropic:{name:'Anthropic',ph:'sk-ant-…',def:'claude-sonnet-4-20250514'},
+ serper:{name:'Serper Search',ph:'Serper API key…',def:'serper-web'}
 };
-
 const PKEYS=Object.keys(PV);
-const AIK='verdant.ai.v4',AI={view:'gemini',active:'gemini',on:{},key:{},model:{},keep:true};
-function saveAI(){
- if(!AI.keep){localStorage.removeItem(AIK);return}
- try{localStorage.setItem(AIK,JSON.stringify(AI))}catch(e){}
-}
-(function loadAI(){
- try{
-  const c=JSON.parse(localStorage.getItem(AIK)||'{}')||{};
-  if(c.view&&PV[c.view])AI.view=c.view;
-  if(c.active&&PV[c.active]&&c.active!=='serper')AI.active=c.active;
-  if(c.on)AI.on=c.on;
-  if(c.key)AI.key=c.key;
-  if(c.model)AI.model=c.model;
-  if(typeof c.keep==='boolean')AI.keep=c.keep;
- }catch(e){}
-})();
-
-const eng=$('#eng'),K=$('#key'),EM=$('#emsg'),MC=$('#mcus');
-const mod=p=>AI.model[p]||PV[p].def;
-const activeLLM=()=>{
- if(AI.active&&AI.active!=='serper'&&AI.on[AI.active]&&AI.key[AI.active])return AI.active;
- return PKEYS.find(p=>p!=='serper'&&AI.on[p]&&AI.key[p])||'';
-};
-function say(t,c){EM.textContent=t||'';EM.className='emsg'+(c?' '+c:'')}
+const AIK='verdant.ai.stable',AI={view:'gemini',key:{}};
+try{Object.assign(AI,JSON.parse(localStorage.getItem(AIK)||'{}'))}catch(e){}
 
 function renderEngine(){
- const p=AI.view,cfg=PV[p],idx=PKEYS.indexOf(p);
- const tabs=$('#etabs');
- tabs.innerHTML='<i></i>';
- tabs.querySelector('i').style.transform=`translateX(${idx*100}%)`;
+ const tabs=$('#etabs');tabs.innerHTML='';
  PKEYS.forEach(k=>{
-  const b=document.createElement('button');
-  b.type='button';
-  b.setAttribute('aria-checked',k===p?'true':'false');
-  const isConn=!!(AI.on[k]&&AI.key[k]);
-  const isAct=(k!=='serper'&&activeLLM()===k)||(k==='serper'&&isConn);
-  b.className=(isConn?'cn':'')+(isAct?' u':'');
-  b.innerHTML=`<span class="dt"></span><span>${PV[k].name}</span>`;
-  b.onclick=()=>{AI.view=k;say('');renderEngine();saveAI()};
+  const b=document.createElement('button');b.type='button';
+  b.setAttribute('aria-checked',AI.view===k?'true':'false');
+  b.textContent=PV[k].name;
+  b.onclick=()=>{AI.view=k;renderEngine()};
   tabs.appendChild(b);
  });
-
- $('#klab').textContent=`${cfg.name} API key`;
- K.placeholder=cfg.ph;
- K.value=AI.key[p]||'';
- $('#kget').href=cfg.get;
- $('#kget').innerHTML=`Get ${cfg.name} key `+ico('ext');
- $('#enote').textContent=cfg.note;
- $('#kkeep').checked=AI.keep;
-
- const isConn=!!(AI.on[p]&&AI.key[p]);
- $('#kdel').hidden=!isConn;
- $('#kuse').hidden=!(isConn && p!=='serper' && activeLLM()!==p);
-
- // Models list
- const ml=$('#mlist');ml.innerHTML='';
- const curM=mod(p);
- cfg.fb.forEach(([id,title,tag])=>{
-  const lbl=document.createElement('label');
-  lbl.className='mr'+(curM===id?' on':'');
-  lbl.innerHTML=`<input type="radio" name="aimod" value="${id}" ${curM===id?'checked':''}><span class="rd"></span><span class="mt"><b>${title}</b><code>${id}</code></span><em>${tag}</em>`;
-  lbl.querySelector('input').onchange=()=>{AI.model[p]=id;MC.value=id;renderEngine();saveAI()};
-  ml.appendChild(lbl);
- });
- $('#mcus-wrap').hidden=(p==='serper');
- MC.value=curM;
-
- // Status header & pill
- const act=activeLLM();
- const serperOn=!!(AI.on.serper&&AI.key.serper);
- eng.classList.toggle('lit',!!(act||serperOn));
- const sText=$('#eng-s'),pill=$('#epill');
- if(act){
-  sText.innerHTML=`Active AI: <b>${PV[act].name}</b> (<code>${mod(act)}</code>)`+(serperOn?' + <b>Serper Web Search</b>':' · Serper optional');
-  pill.className='epill';
-  pill.innerHTML=`<i></i><b>${PV[act].name}</b><span>${mod(act)}${serperOn?' + Serper':''}</span>`;
- }else{
-  sText.innerHTML=`Using server default / cloud fallback`+(serperOn?' + <b>Serper Web Search</b>':' · Paste a key below to test any AI');
-  pill.className='epill off';
-  pill.innerHTML=`<i></i><b>Server Default</b><span>Click to configure AI</span>`;
- }
+ $('#klab').textContent=`${PV[AI.view].name} API Key`;
+ $('#key').placeholder=PV[AI.view].ph;
+ $('#key').value=AI.key[AI.view]||'';
+ $('#eng-s').textContent=`Active Provider: ${PV[AI.view].name}`;
 }
-
-MC.oninput=()=>{
- const p=AI.view;if(p==='serper')return;
- const v=MC.value.trim();
- if(v){AI.model[p]=v;saveAI();renderEngine()}
-};
-
-$('#kshow').onclick=()=>{K.type=K.type==='password'?'text':'password'};
-$('#kkeep').onchange=e=>{AI.keep=e.target.checked;saveAI()};
-$('#kuse').onclick=()=>{
- if(AI.view!=='serper'&&AI.on[AI.view]){
-  AI.active=AI.view;saveAI();renderEngine();
-  say(`${PV[AI.view].name} is now your active 3D builder AI.`,'ok');
- }
-};
-$('#kdel').onclick=()=>{
- const p=AI.view;
- delete AI.key[p];delete AI.on[p];
- K.value='';
- if(AI.active===p)AI.active=activeLLM()||'gemini';
- saveAI();renderEngine();
- say(`Removed ${PV[p].name} key.`,'');
-};
-
-$('#eng-tg').onclick=()=>{
- const c=eng.classList.toggle('closed');
- $('#eng-tgl').textContent=c?'Configure':'Hide';
-};
-$('#epill').onclick=()=>{
- eng.classList.remove('closed');
- $('#eng-tgl').textContent='Hide';
- eng.scrollIntoView({behavior:'smooth'});
-};
-
-async function connect(){
- const p=AI.view,k=K.value.trim();
- if(!k){say(`Please paste your ${PV[p].name} API key first.`,'bad');return}
- const btn=$('#kgo');btn.disabled=true;btn.textContent='Testing…';
- say(`Verifying ${PV[p].name} key with backend…`,'');
+$('#kgo').onclick=async()=>{
+ const p=AI.view,k=$('#key').value.trim();
+ if(!k)return toast('Enter an API key');
  try{
-  const res=await fetch('/test-key',{
-   method:'POST',
-   headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({provider:p,api_key:k,model:mod(p)})
-  });
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok)throw new Error(data.detail||`Failed to verify ${PV[p].name} key.`);
-  AI.key[p]=k;
-  AI.on[p]=true;
-  if(p!=='serper')AI.active=p;
-  saveAI();renderEngine();
-  say(data.message||`${PV[p].name} connected & verified!`,'ok');
-  toast(`${PV[p].name} Connected!`);
+  const res=await fetch('/test-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p,api_key:k,model:PV[p].def})});
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.detail||'Failed');
+  AI.key[p]=k;localStorage.setItem(AIK,JSON.stringify(AI));
+  $('#emsg').textContent=data.message;$('#emsg').className='emsg ok';toast('Connected!');
  }catch(e){
-  say(e.message,'bad');
- }finally{
-  btn.disabled=false;btn.textContent='Test & Connect';
+  $('#emsg').textContent=e.message;$('#emsg').className='emsg bad';
  }
-}
-$('#kgo').onclick=connect;
+};
 
-const EX=['A clean low-poly Roblox tree','A sleek sci-fi hover car','A stylized fantasy sword','A low-poly stone chest'];
-EX.forEach(t=>{const c=document.createElement('button');c.className='chip';c.textContent=t;c.onclick=()=>{$('#prompt').value=t};$('#chips').appendChild(c)});
-const step=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
-const progSet=p=>$('#prog i').style.width=p+'%';
+['A low-poly pine tree','A cool sports car','A medieval castle tower'].forEach(t=>{
+ const c=document.createElement('button');c.className='chip';c.textContent=t;
+ c.onclick=()=>$('#prompt').value=t;$('#chips').appendChild(c);
+});
 
-async function runOps(ops,keepExisting){
- if(!keepExisting)wipe();
+async function runOps(ops){
+ wipe();
  for(const [n,o] of ops.entries()){
-  try{apply(o);}catch(e){}
-  progSet((n+1)/ops.length*100);
-  if(n%5===0||n===ops.length-1){fit();refresh();}
-  await sleep(8);
+  addPart(o,false);
+  $('#prog').style.width=((n+1)/ops.length*100)+'%';
+  if(n%5===0){fit();refresh();}
+  await sleep(6);
  }
  fit();refresh();
 }
 
-let busy=false;
-async function build(){
- const t=$('#prompt').value.trim();if(!t)return toast('Describe a model first');
- if(busy)return;busy=true;$('#build').disabled=true;$('#build').textContent='Building…';$('#steps').innerHTML='';progSet(0);
- $('#rc').classList.add('busy');
-
- const act=activeLLM();
- const prov=act||(AI.view!=='serper'?AI.view:'gemini');
- const apiKey=act?AI.key[act]:(AI.key[prov]||'');
- const modelId=mod(prov);
- const serperKey=(AI.on.serper&&AI.key.serper)?AI.key.serper:'';
- const useSerper=$('#use-serper').checked;
-
+$('#build').onclick=async()=>{
+ const t=$('#prompt').value.trim();if(!t)return toast('Describe something first');
+ $('#build').disabled=true;$('#build').textContent='Building…';$('#steps').innerHTML='';$('#rc').classList.add('busy');
  try{
-  if(useSerper){
-   step(serperKey?'Searching web proportions with Serper AI…':'Requesting Serper web research (if configured on server)…');
-  }
-  step(`Generating 3D blocks with ${PV[prov]?PV[prov].name:'AI'} (${modelId})…`);
   const res=await fetch('/generate',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({
     prompt:t,
-    use_serper:useSerper,
-    provider:prov,
-    model:modelId,
-    api_key:apiKey,
-    serper_key:serperKey
+    use_serper:$('#use-serper').checked,
+    provider:AI.view,
+    model:PV[AI.view].def,
+    api_key:AI.key[AI.view]||'',
+    serper_key:AI.key.serper||''
    })
   });
-
-  if(!res.ok){
-   const err=await res.json().catch(()=>({}));
-   throw new Error(err.detail || 'Server overloaded or unavailable.');
-  }
-
+  if(!res.ok){const err=await res.json();throw new Error(err.detail||'Generation failed')}
   const data=await res.json();
-  if(!data.ops||!data.ops.length)throw new Error('No parts returned.');
-
-  if(data.used_serper){
-   step('✓ Serper web context applied to geometry','ok');
-  }
-  step('Assembling '+data.ops.length+' blocks…');
-  await runOps(data.ops,$('#keep').checked);
-  step('Done: '+data.title,'ok');
+  await runOps(data.ops);
+  toast('Built '+data.title+'!');
  }catch(e){
-  step('Error: '+e.message,'bad');
-  progSet(0);
+  toast('Error: '+e.message);
+  $('#steps').innerHTML='<div style="color:var(--bad)">'+e.message+'</div>';
  }finally{
-  busy=false;$('#build').disabled=false;$('#build').textContent='Build with AI';
-  $('#rc').classList.remove('busy');
+  $('#build').disabled=false;$('#build').textContent='Build with AI';$('#rc').classList.remove('busy');
  }
-}
-$('#build').onclick=build;
+};
 
-// Ready-made Library presets
 const LIB=[
- ['Pine Tree','A crisp low-poly Roblox pine tree',[
-  {op:'add',id:'Trunk',shape:'cylinder',size:[.45,1.2,.45],pos:[0,.6,0],color:'#7c4d2b'},
-  {op:'add',id:'Leaves1',shape:'cone',size:[1.8,1.5,1.8],pos:[0,1.6,0],color:'#178a4c'},
-  {op:'add',id:'Leaves2',shape:'cone',size:[1.4,1.3,1.4],pos:[0,2.4,0],color:'#22a85f'},
-  {op:'add',id:'Leaves3',shape:'cone',size:[1.0,1.1,1.0],pos:[0,3.1,0],color:'#47c47e'}
+ ['Pine Tree',[
+  {shape:'cylinder',size:[.4,1,.4],color:'#7c4d2b'},
+  {shape:'cone',size:[1.6,1.4,1.6],color:'#178a4c'},
+  {shape:'cone',size:[1.2,1.2,1.2],color:'#22a85f'}
  ]],
- ['Guard Robot','Blocky Roblox helper bot',[
-  {op:'add',id:'LegL',shape:'box',size:[.35,.8,.35],pos:[-.3,.4,0],color:'#4a6458'},
-  {op:'add',id:'LegR',shape:'box',size:[.35,.8,.35],pos:[.3,.4,0],color:'#4a6458'},
-  {op:'add',id:'Torso',shape:'box',size:[1.1,1.2,.65],pos:[0,1.4,0],color:'#178a4c'},
-  {op:'add',id:'Head',shape:'box',size:[.8,.7,.7],pos:[0,2.45,0],color:'#8fe3a9'},
-  {op:'add',id:'Visor',shape:'box',size:[.65,.22,.1],pos:[0,2.48,.35],color:'#0f2a20'}
+ ['Sports Car',[
+  {shape:'box',size:[1.8,.6,.9],color:'#b3342f'},
+  {shape:'box',size:[1,.5,.8],color:'#ffffff'}
  ]]
 ];
-LIB.forEach(([title,desc,ops])=>{
- const b=document.createElement('button');b.className='card tile';
- b.innerHTML=`<div class="ic">${ico('parts')}</div><b>${title}</b><span>${desc}</span>`;
- b.onclick=()=>{go('ai');runOps(ops,false);toast('Loaded '+title)};
+LIB.forEach(([title,ops])=>{
+ const b=document.createElement('div');b.className='tile';
+ b.innerHTML=`<b>${title}</b><span>Load ready-made model</span>`;
+ b.onclick=()=>{go('ai');runOps(ops);toast('Loaded '+title)};
  $('#lib').appendChild(b);
 });
 
 const slAi=$('#slot-ai'),slParts=$('#slot-parts'),rc=$('#rc'); function go(n){ $$('.page').forEach(p=>p.classList.toggle('on',p.id=='p-'+n));
- $$('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.go===n)); BG.dataset.page=n; if(n==='parts')slParts.appendChild(rc); else if(n==='ai')slAi.appendChild(rc); } $$
+ $$('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.go===n)); if(n==='parts')slParts.appendChild(rc); else if(n==='ai')slAi.appendChild(rc); } $$
 ('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
 
-renderEngine();
-go('ai');
-refresh();
+renderEngine();go('ai');refresh();
 </script></body></html>
