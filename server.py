@@ -151,7 +151,6 @@ async def call_gemini(client: httpx.AsyncClient, api_key: str, model: str, syste
                 if text:
                     return text
             elif res.status_code == 400 and "responseMimeType" in res.text:
-                # Retry without responseMimeType for older/experimental endpoints
                 payload["generationConfig"].pop("responseMimeType", None)
                 res2 = await client.post(url, json=payload)
                 if res2.status_code == 200:
@@ -162,7 +161,7 @@ async def call_gemini(client: httpx.AsyncClient, api_key: str, model: str, syste
                         return text
             last_err = f"Gemini ({m}) HTTP {res.status_code}: {res.text[:200]}"
             if res.status_code in (401, 403):
-                break  # Invalid API key, don't retry other models
+                break
         except Exception as e:
             last_err = str(e)
             continue
@@ -253,7 +252,7 @@ async def call_llm_architect(
     key = (api_key or "").strip()
 
     async with httpx.AsyncClient(timeout=95.0) as client:
-        # If the user explicitly selected & connected a provider in the UI, try it first
+        # 1. Explicit provider requested from UI
         if prov == "gemini" and (key or GEMINI_API_KEY):
             return await call_gemini(client, key or GEMINI_API_KEY, model or AI_MODEL, system_prompt, user_prompt)
         if prov == "openrouter" and (key or OPENROUTER_API_KEY):
@@ -263,7 +262,7 @@ async def call_llm_architect(
         if prov == "anthropic" and (key or ANTHROPIC_API_KEY):
             return await call_anthropic(client, key or ANTHROPIC_API_KEY, model, system_prompt, user_prompt)
 
-        # Otherwise cascade through configured server environment keys
+        # 2. Cascade through configured server environment keys
         errors: List[str] = []
         if GEMINI_API_KEY:
             try:
@@ -289,7 +288,7 @@ async def call_llm_architect(
             except Exception as e:
                 errors.append(str(e))
 
-        # Final free cloud fallback if no keys are configured
+        # 3. Free cloud fallback if no keys are configured
         try:
             res = await client.post(
                 "https://text.pollinations.ai/openai",
@@ -404,7 +403,6 @@ async def test_key(req: TestKeyRequest):
                     },
                 )
                 if res.status_code != 200:
-                    # Fallback test with gemini-2.5-flash if custom model was invalid
                     if m != "gemini-2.5-flash":
                         url2 = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
                         res2 = await client.post(
@@ -498,7 +496,7 @@ async def generate(req: GenerateRequest):
     try:
         raw_output = await call_llm_architect(
             system_prompt=MASTER_SCULPTING_SKILL,
-            user_instruction if False else user_instruction,
+            user_prompt=user_instruction,
             provider=req.provider or "",
             model=req.model or "",
             api_key=req.api_key or "",
