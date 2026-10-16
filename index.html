@@ -384,7 +384,7 @@ main{padding:20px 16px 96px}#toast{bottom:90px}.ph small{display:none}}
   </div></div>
  </div>
 </section>
-<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a giant emerald serpent, a cozy cottage, or a red sports car"></textarea>
+<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a clean low-poly Roblox tree, a sleek sci-fi hover car, or a stylized sword"></textarea>
 <div class="chips" id="chips"></div>
 <div class="row"><label class="ck"><input type="checkbox" id="keep">Add to current model</label><label class="ck"><input type="checkbox" id="use-serper" checked>Use Serper web search</label><span class="sp"></span><button class="btn pri" id="build">Build with AI</button></div>
 <div class="prog" id="prog"><i></i></div>
@@ -483,7 +483,7 @@ function wipe(){parts.forEach(m=>{world.remove(m);m.geometry.dispose();m.materia
 const SH=['box','sphere','cylinder','cone','torus'];
 function normShape(s){s=String(s||'box').toLowerCase();if(s=='ball'||s=='ellipsoid')return'sphere';if(s=='tube'||s=='pillar'||s=='rod')return'cylinder';if(s=='pyramid'||s=='roof'||s=='wedge')return'cone';if(s=='ring'||s=='donut')return'torus';return SH.includes(s)?s:'box'}
 function uniq(id){id=String(id||'part').slice(0,40);const b=id;let i=2;while(parts.has(id))id=b+' '+i++;return id}
-function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.35))),c:hex(o.color)};
+function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.04))),c:hex(o.color)};
  const id=uniq(o.id||o.name||sh),m=mk(u,vec(o.pos||o.position,[0,s[1]/2,0]),(o.rot||o.rotation)?rad(o.rot||o.rotation):null,quiet);parts.set(id,m);return id}
 function apply(o){if(!o||typeof o!='object')throw Error('empty');const op=String(o.op||'add').toLowerCase();const g=()=>{const m=parts.get(o.id);if(!m)throw Error('missing '+o.id);return m};
  switch(op){case'add':return'Added '+addPart(o);
@@ -515,7 +515,7 @@ const F=[['Width','w',.1,6,.05],['Height','h',.1,6,.05],['Depth','z',.1,6,.05],[
 const gv=(m,k)=>k=='x'?m.position.x:k=='y'?m.position.y:k=='pz'?m.position.z:k=='ry'?((m.rotation.y*180/Math.PI)%360+360)%360:m.userData.u[k];
 function sv(m,k,v){if(k=='x')m.position.x=v;else if(k=='y')m.position.y=v;else if(k=='pz')m.position.z=v;else if(k=='ry')m.rotation.y=v*Math.PI/180;else{m.userData.u[k]=v;rebuild(m)}}
 const COLS=['#ffffff','#e6f8ed','#8fe3a9','#3fbf7f','#27c4d8','#a8f0f5','#a8754f','#2b3a36'];
-function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/130*100)+'%';$('#empty').style.opacity=n?0:1;
+function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/60*100)+'%';$('#empty').style.opacity=n?0:1;
  const pl=$('#plist'),ps=pl.scrollTop;pl.innerHTML='';if(!n)pl.innerHTML='<div class="hint">No parts yet. Add a shape above or use the AI Builder.</div>';
  parts.forEach((m,id)=>{const b=document.createElement('button');b.className='pi'+(id==sel?' on':'');const i=document.createElement('i');i.style.background=m.userData.u.c;b.append(i,id);b.onclick=()=>select(id);pl.appendChild(b)});pl.scrollTop=ps;
  const ins=$('#insp'),m=parts.get(sel);
@@ -536,68 +536,33 @@ function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' pa
  b.onclick=()=>{const n=parts.size,id=addPart({id:l,shape:k,size:[1,1,1],pos:[(n%4-1.5)*1.4,.5,(Math.floor(n/4)%3-1)*1.4]});snap();fit();select(id)};$('#shapes').appendChild(b)});
 $('#undo').onclick=undo;$('#clear').onclick=()=>{wipe();snap();fit();refresh()};
 
-/* ═══ AI Builder + Master Block Sculpting Curriculum ═══ */
-const SYS0=`You are a Master 3D Block-Sculpting Architect (Distinctus / Roblox Studio Master Builder tier). You have ZERO ready assets; synthesize every model mathematically from 75 to 130 articulated 3D parts. Reply with ONLY valid JSON (no markdown fences): {"title":"Model Name","ops":[{"op":"add","id":"PartName","shape":"box|sphere|cylinder|cone|torus","size":[width_x,height_y,depth_z],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.06}]}.
-MASTER SCULPTING RULES:
-1. PART DENSITY (75 to 130 parts): Never use 1 blob for a head, wing, or body. Prefer crisp "box" parts (smooth: 0.04 to 0.12) and angled plates over spheres.
-2. KINEMATIC CHAINS: Build necks, tails, tentacles, and limbs out of 4 to 7 progressively tapered, angled segments.
-3. LAYERED WINGS, MANES & HAIR: Fan 8 to 14 individual angled feather/mane plates along wing bones or around heads with progressive rotations and two-tone tip colors.
-4. FACIAL MICRO-STACKING: Build Cranium, BrowRidge, Snout/Muzzle, LowerJaw, Sclera (#ffffff), Iris, and Pupil (#111111) offset 0.02m forward so surfaces never flicker (no coplanar Z-fighting!).
-5. VEHICLE PROPORTIONS: Cars must stand ~2.5 to 3.0 wheel-diameters tall with separate wheel arches, angled windshield/pillars, spoiler, headlights, and grille.
-6. COORDINATES: Meters, Y is up, ground is y=0. Keep the whole model within 6 meters and ensure every part physically connects.`;
-const EX=['A giant emerald serpent','A cozy cottage with a tree','A friendly robot','A red sports car','A rocket on a launch pad','A snowman with a hat'];
+/* ═══ AI Builder + Roblox Game-Ready Minimalist Skill ═══ */
+const SYS0=`You are a Roblox Game Asset Builder. You design clean, iconic, blocky 3D models tailored specifically for modern Roblox games (sharp hard-cornered geometry, 30 to 55 parts max, vibrant and bold color palette, zero micro-clutter). Reply with ONLY valid JSON (no markdown fences): {"title":"Roblox Style Model","ops":[{"op":"add","id":"PartName","shape":"box|sphere|cylinder|cone|torus","size":[width_x,height_y,depth_z],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.02}]}.
+ROBLOX GAME-READY LAWS:
+1. PART BUDGET: 30 to 55 parts max. Clean, readable silhouettes.
+2. HARD CORNERS: Use "box" shapes with sharp edges (smooth: 0.01 to 0.03).
+3. BOLD PALETTE: Use 3 to 4 flat, vibrant, saturated colors. No muddy textures.
+4. COORDINATES: Meters, Y is up, ground is y=0. Ensure stability and zero Z-fighting.`;
+const EX=['A clean low-poly Roblox tree','A sleek sci-fi hover car','A stylized fantasy sword','A low-poly stone chest','A cartoon mushroom house','A neon cyber helmet'];
 EX.forEach((t,i)=>{const c=document.createElement('button');c.className='chip';c.textContent=t;c.style.animationDelay=(i*60+120)+'ms';c.onclick=()=>{$('#prompt').value=t;$('#prompt').focus()};$('#chips').appendChild(c)});
 const step=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
 function progSet(p,instant){const e=$('#prog i');if(instant){e.style.transition='none';e.style.width=p+'%';void e.offsetWidth;e.style.transition=''}else e.style.width=p+'%'}
 let token=0;
-async function runOps(ops, gap) {
-  const my = ++token;
-  let bad = 0;
-  
-  for (const [n, o] of ops.entries()) {
-    if (my != token) return;
-    try {
-      apply(o);
-      // Only log every few parts or for important steps to avoid DOM choking
-      if (gap > 40 && n % 5 === 0) step('✓ Built part ' + (n + 1));
-    } catch (e) {
-      bad++;
-    }
-    
-    // Update progress bar smoothly without lagging
-    progSet((n + 1) / ops.length * 100);
-    
-    // Only fit and refresh UI periodically or on the last item, preventing browser lockup
-    if (n % 10 === 0 || n === ops.length - 1) {
-      fit();
-      refresh();
-    }
-    
-    // Tiny yield to let the browser breathe (prevents "Aw, Snap!" memory/CPU spikes)
-    await sleep(5);
-  }
-  
-  step('✓ Model built successfully (' + ops.length + ' parts).', 'ok');
-  return bad;
+async function runOps(ops,gap){
+ const my=++token;let bad=0;
+ for(const [n,o] of ops.entries()){
+  if(my!=token)return;
+  try{
+   const l=apply(o);
+   if(n%3===0)step('✓ '+l);
+  }catch(e){bad++;}
+  progSet((n+1)/ops.length*100);
+  if(n%5===0 || n===ops.length-1){fit();refresh();}
+  await sleep(12);
+ }
+ return bad;
 }
-  
-  // 1. Instantly load all parts into the 3D world first without lagging the UI
-  for (const [n, o] of ops.entries()) {
-    if (my != token) return;
-    try {
-      apply(o);
-    } catch (e) {
-      bad++;
-    }
-  }
-
-  // 2. Perform a single camera fit and UI refresh at the end
-  fit();
-  refresh();
-  progSet(100);
-  step('✓ Built ' + ops.length + ' parts successfully.', 'ok');
-  return bad;
-}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 const PV={
  serper:{name:'Serper',get:'https://serper.dev/api-key',ph:'Paste Serper.dev API key…',def:'serper-web-5',
@@ -675,11 +640,11 @@ const H={
    let j;
    try{
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.25,maxOutputTokens:16384}})});
+     body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.3,maxOutputTokens:8192}})});
    }catch(e){
     if(e.code=='nomodel'&&m!='gemini-2.5-flash')return H.gemini.ask(k,'gemini-2.5-flash',sys,t);
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.25,maxOutputTokens:16384}})});
+     body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.3,maxOutputTokens:8192}})});
    }
    const c=(j.candidates||[])[0];return((c&&c.content&&c.content.parts)||[]).map(p=>p.text||'').join('');
   }
@@ -693,7 +658,7 @@ const H={
   },
   async ask(k,m,sys,t){
    const j=await api('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{...H.groq.hd(k),'Content-Type':'application/json'},
-    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],temperature:0.25,max_tokens:8192,response_format:{type:'json_object'}})});
+    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],temperature:0.3,max_tokens:8192,response_format:{type:'json_object'}})});
    return(((j.choices||[])[0]||{}).message||{}).content||'';
   }
  },
@@ -711,7 +676,7 @@ const H={
   },
   async ask(k,m,sys,t){
    const j=await api('https://api.anthropic.com/v1/messages',{method:'POST',headers:{...H.anthropic.hd(k),'content-type':'application/json'},
-    body:JSON.stringify({model:m,max_tokens:12000,temperature:0.25,system:sys,messages:[{role:'user',content:t}]})});
+    body:JSON.stringify({model:m,max_tokens:8192,temperature:0.3,system:sys,messages:[{role:'user',content:t}]})});
    return(j.content||[]).filter(c=>c.type=='text').map(c=>c.text).join('');
   }
  },
@@ -725,7 +690,7 @@ const H={
   },
   async ask(k,m,sys,t){
    const j=await api('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{...H.openai.hd(k),'Content-Type':'application/json'},
-    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],max_completion_tokens:12000,response_format:{type:'json_object'}})});
+    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],max_completion_tokens:8192,response_format:{type:'json_object'}})});
    return(((j.choices||[])[0]||{}).message||{}).content||'';
   }
  }
@@ -885,7 +850,7 @@ async function askBuiltInCloudAI(fullPrompt,rawQuery){
    if(j&&Array.isArray(j.parts)&&j.parts.length){
     return JSON.stringify({
      title:j.name||rawQuery,
-     ops:j.parts.map(p=>({op:'add',id:p.n,shape:p.s,size:p.sz,pos:p.po,rot:p.ro,color:p.c,smooth:0.06}))
+     ops:j.parts.map(p=>({op:'add',id:p.n,shape:p.s,size:p.sz,pos:p.po,rot:p.ro,color:p.c,smooth:0.02}))
     });
    }
   }
@@ -897,7 +862,7 @@ async function askBuiltInCloudAI(fullPrompt,rawQuery){
    body:JSON.stringify({
     model:'openai',
     messages:[{role:'system',content:SYS0},{role:'user',content:fullPrompt}],
-    temperature:0.25,
+    temperature:0.3,
     jsonMode:true
    })
   },28000);
@@ -912,7 +877,7 @@ async function askAI(rawQuery,webContext){
  if(K.value.trim()&&!AI.on[AI.view]){
   await connect();
  }
- const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate anatomy, parts, and colors): '+webContext:'');
+ const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate structure and colors): '+webContext:'');
  const llm=readyLLM();
  if(llm)return H[llm].ask(AI.key[llm],mod(llm),SYS0,fullPrompt);
  if(window.claude){
@@ -930,7 +895,7 @@ function parseAIResponse(text){
  let j;
  try{j=JSON.parse(clean.slice(a,b+1))}catch(e){throw{code:'empty'}}
  const rawOps=Array.isArray(j.ops)?j.ops:(Array.isArray(j.parts)?j.parts:[]);
- const ops=rawOps.filter(x=>x&&typeof x=='object').map(o=>({...o,op:o.op||'add'})).slice(0,160);
+ const ops=rawOps.filter(x=>x&&typeof x=='object').map(o=>({...o,op:o.op||'add'})).slice(0,80);
  if(!ops.length)throw{code:'empty'};
  return{title:j.title||j.name||'your model',ops,diagnostics:j.diagnostics||null};
 }
@@ -945,20 +910,19 @@ async function build(){
  try{
   const webCtx=await fetchWebResearch(t);
   const via=readyLLM();
-  step('Building 3D geometry with '+(via?PV[via].name+' ('+mod(via)+')':'Built-in Cloud AI')+'…');
+  step('Building 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Built-in Cloud AI')+'…');
   const text=await askAI(t,webCtx);
   const parsed=parseAIResponse(text);
   const ops=parsed.ops;
   if(!$('#keep').checked)ops.unshift({op:'clear'});
   $('#rc').classList.remove('busy');
-  const gap=Math.max(18,Math.round(1800/ops.length));
-  await runOps(ops,gap);
+  await runOps(ops);
   snap();
   if(parsed.diagnostics){
    if(parsed.diagnostics.overlap_check)step('⚡ '+parsed.diagnostics.overlap_check);
    if(parsed.diagnostics.proportion_check)step('📐 '+parsed.diagnostics.proportion_check);
   }
-  step('Done: '+parsed.title+'. Fine-tune it in Parts.','ok');
+  step('Done: '+parsed.title+'. Ready for your game!','ok');
  }catch(e){
   step(why(e,readyLLM()),'bad');
   if(e&&e.msg)step(e.msg);
@@ -978,7 +942,7 @@ const TPL={House:['home',[L('box',[2,1.2,2],[0,.6,0],'#ffffff'),L('cone',[3,1.1,
  Rocket:['rocket',[L('cylinder',[.9,2.4,.9],[0,1.4,0],'#ffffff'),L('cone',[.9,.9,.9],[0,3.05,0],'#27c4d8'),L('sphere',[.4,.4,.2],[0,1.9,.42],'#8fe3a9'),L('box',[.1,.7,.6],[-.55,.5,0],'#27c4d8'),L('box',[.1,.7,.6],[.55,.5,0],'#27c4d8')]]};
 Object.entries(TPL).forEach(([n,[ic,rows]])=>{const b=document.createElement('button');b.className='card tile';b.innerHTML='<div class="ic"></div><b></b><span></span>';
  b.children[0].innerHTML=ico(ic);b.children[1].textContent=n;b.children[2].textContent=rows.length+' parts · open in Parts';
- b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+' '+(i+1),shape:k,size:s,pos:p,color:c,smooth:.06})),50);snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
+ b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+' '+(i+1),shape:k,size:s,pos:p,color:c,smooth:.02})));snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
 
 /* ═══ Result card + navigation ═══ */
 $$('[data-v]').forEach(b=>b.onclick=()=>{const[a,e]=b.dataset.v.split(',').map(Number);spin=false;$('#spin').classList.remove('on');view.az=a;view.el=e});
