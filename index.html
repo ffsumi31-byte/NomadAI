@@ -550,8 +550,27 @@ EX.forEach((t,i)=>{const c=document.createElement('button');c.className='chip';c
 const step=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
 function progSet(p,instant){const e=$('#prog i');if(instant){e.style.transition='none';e.style.width=p+'%';void e.offsetWidth;e.style.transition=''}else e.style.width=p+'%'}
 let token=0;
-async function runOps(ops,gap){const my=++token;let bad=0;for(const [n,o] of ops.entries()){if(my!=token)return;try{const l=apply(o);if(gap>40)step('✓ '+l)}catch(e){bad++}if(gap>40)progSet((n+1)/ops.length*100);fit();refresh();await sleep(gap)}return bad}
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function runOps(ops, gap) {
+  const my = ++token;
+  let bad = 0;
+  
+  // 1. Instantly load all parts into the 3D world first without lagging the UI
+  for (const [n, o] of ops.entries()) {
+    if (my != token) return;
+    try {
+      apply(o);
+    } catch (e) {
+      bad++;
+    }
+  }
+
+  // 2. Perform a single camera fit and UI refresh at the end
+  fit();
+  refresh();
+  progSet(100);
+  step('✓ Built ' + ops.length + ' parts successfully.', 'ok');
+  return bad;
+}
 
 const PV={
  serper:{name:'Serper',get:'https://serper.dev/api-key',ph:'Paste Serper.dev API key…',def:'serper-web-5',
