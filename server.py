@@ -85,6 +85,7 @@ GEMINI_MODEL_ALIASES = {
     "3.6flash": "gemini-2.5-flash",
     "3.6-flash": "gemini-2.5-flash",
     "gemini-3.6-flash": "gemini-2.5-flash",
+    "3.5-flash": "gemini-2.5-flash",
     "gemini-3.5-flash": "gemini-2.5-flash",
     "gemini-3.5-flash-lite": "gemini-2.5-flash-lite",
     "gemini-3.0-flash": "gemini-2.5-flash",
@@ -319,7 +320,7 @@ def build_revision_prompt(prompt: str, cat: str, lo: int, hi: int, parts: List[D
     if problems:
         out.append("PROBLEMS FOUND BY THE CHECKER - fix all of them:\n" + "\n".join("- " + m for m in problems))
     out.append('Return the COMPLETE corrected build in the same JSON schema (plan + every op), never a diff.')
-    return "\n\n".join(out)
+    return "\n".join(out)
 
 
 # --------------------------------------------------------------------------- providers & 3.7/3.8 flash support
@@ -684,32 +685,26 @@ def parse_llm_json(text: str) -> Dict[str, Any]:
     dec = json.JSONDecoder()
     for fix in (False, True):
         s = re.sub(r",\s*([}\]])", r"\1", t) if fix else t
-        if prov == "serper":
-                res = await client.post("https://google.serper.dev/search", headers={"X-API-KEY": key, "Content-Type": "application/json"},
-                                        json={"q": "3D low poly model", "num": 1})
-                if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail="Serper rejected key.")
-                return {"ok": True, "message": "Serper verified & active!"}
-            if prov == "gemini":
-                m = normalize_gemini_model(model or "gemini-2.5-flash")
-                res = await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
-                                        headers={"x-goog-api-key": key},
-                                        json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}})
-                if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
-                return {"ok": True, "message": f"Gemini verified ({model or m})!"}
-            if prov in ("openai", "groq"):
-                base = "https://api.openai.com/v1" if prov == "openai" else "https://api.groq.com/openai/v1"
-                m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
-                payload: Dict[str, Any] = {"model": m, "messages": [{"role": "user", "content": "OK"}]}
-                payload["max_completion_tokens" if _is_reasoning(m) else "max_tokens"] = 64 if _is_reasoning(m) else 10
-                await _post_healing(client, prov, base + "/chat/completions", {"Authorization": f"Bearer {key}"}, payload)
-                return {"ok": True, "message": f"{prov.title()} verified!"}
-            if prov == "anthropic":
-                await _post_healing(client, "anthropic", "https://api.anthropic.com/v1/messages",
-                                    {"x-api-key": key, "anthropic-version": "2023-06-01"},
-                                    {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]})
-                return {"ok": True, "message": "Anthropic verified!"}
+        starts = [x for x in (s.find("{"), s.find("[")) if x >= 0]
+        if not starts:
+            break
+        try:
+            obj, _ = dec.raw_decode(s[min(starts):])
+        except ValueError:
+            continue
+        if isinstance(obj, list):
+            obj = {"ops": obj}
+        if isinstance(obj, dict):
+            return obj
+    return salvage_ops(t)
+
+
+def _num(v: Any, d: float = 0.0) -> float:
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else d
+    except (TypeError, ValueError):
+        return d
 
 
 def _vec3(v: Any, d: Tuple[float, float, float]) -> List[float]:
@@ -799,8 +794,6 @@ def heal_part_shape_and_smoothness(pid: str, shape: str, size: List[float], smoo
     """Ensures organic creature/character/plant parts are smooth & sculpted rather than flat-shaded sharp boxes."""
     is_sharp = bool(_SHARP_PART.search(pid))
     if cat in ("creature", "plant") and shape == "box" and not is_sharp:
-        # If an LLM used a box for a squid mantle, fin, tentacle segment, head, or foliage cluster,
-        # upgrade either its shape or bevel smoothness so it never looks like a jagged plank
         if re.search(r"mantle|fin_|suck|club|eye|pupil|foliage|canopy|bush|berry", pid, re.I):
             shape = "sphere"
             smooth = max(smooth, 0.68)
@@ -963,7 +956,6 @@ def stitch_articulated_chains(parts: List[Dict[str, Any]]) -> int:
         seq.sort(key=lambda x: x[0])
         indices = [idx for _, idx in seq]
         chain_set = set(indices)
-        # Find detail parts (suckers, pads, claws) belonging to this limb prefix
         child_indices = [
             i for i, p in enumerate(parts)
             if i not in chain_set and p["id"].lower().startswith(prefix)
@@ -976,7 +968,6 @@ def stitch_articulated_chains(parts: List[Dict[str, Any]]) -> int:
             b_prev, b_curr = aabb(p_prev), aabb(p_curr)
             gap, mv = aabb_gap(b_prev, b_curr)
 
-            # Also check center-to-center distance vs sum of half-lengths
             dx = [p_curr["pos"][k] - p_prev["pos"][k] for k in range(3)]
             dist = math.sqrt(sum(d * d for d in dx))
             r_prev = max(p_prev["size"]) * 0.5
@@ -984,7 +975,6 @@ def stitch_articulated_chains(parts: List[Dict[str, Any]]) -> int:
             max_reach = (r_prev + r_curr) * 0.88
 
             if gap > 0.02 or dist > max_reach * 1.15:
-                # If the segment is slightly short, lengthen its primary axis up to 25% to bridge cleanly
                 long_axis = max(range(3), key=lambda k: p_curr["size"][k])
                 if p_curr["shape"] in ("cylinder", "cone"):
                     long_axis = 1
@@ -993,14 +983,12 @@ def stitch_articulated_chains(parts: List[Dict[str, Any]]) -> int:
                 gap, mv = aabb_gap(b_prev, b_curr)
 
             if gap > 0.01 and dist > 1e-4:
-                # Pull `i_curr` (and all downstream chain segments + nearby detail parts) into `i_prev`
                 shift = [v + (0.12 if v > 0 else -0.12 if v < 0 else 0.0) for v in mv]
                 downstream = indices[pos_idx + 1:]
                 curr_pos_before = list(p_curr["pos"])
                 for d_idx in downstream:
                     for k in range(3):
                         parts[d_idx]["pos"][k] += shift[k]
-                # Move any detail suckers/claws that were closer to the downstream segments
                 for c_idx in child_indices:
                     c_pos = parts[c_idx]["pos"]
                     d_to_curr = math.sqrt(sum((c_pos[k] - curr_pos_before[k]) ** 2 for k in range(3)))
@@ -1090,7 +1078,6 @@ def snap_floating(parts: List[Dict[str, Any]], max_gap: float = 16.0) -> int:
         for comp in comps[1:]:
             if all(_FLOAT_OK.match(parts[i]["id"]) for i in comp):
                 continue
-            # Prefer snapping to a part in `main` that shares the same prefix (e.g. "Tentacle_L")
             comp_prefix = "_".join(parts[comp[0]]["id"].split("_")[:2]).lower()
             candidates = [m for m in main if parts[m]["id"].lower().startswith(comp_prefix)] or main
             best = None
@@ -1099,7 +1086,6 @@ def snap_floating(parts: List[Dict[str, Any]], max_gap: float = 16.0) -> int:
                     d, mv = aabb_gap(bx[m], bx[i])
                     if best is None or d < best[0]:
                         best = (d, mv)
-            # If prefix candidates were too far, check all of `main`
             if best is None or best[0] > 6.0:
                 for i in comp:
                     for m in main_set:
@@ -1419,16 +1405,21 @@ async def test_key(req: TestKeyRequest):
     async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             if prov == "serper":
-                res = await client.post("[https://google.serper.dev/search](https://google.serper.dev/search)", headers={"X-API-KEY": key, "Content-Type": "application/json"},
-                                        json={"q": "3D low poly model", "num": 1})
+                res = await client.post(
+                    "[https://google.serper.dev/search](https://google.serper.dev/search)",
+                    headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                    json={"q": "3D low poly model", "num": 1},
+                )
                 if res.status_code != 200:
                     raise HTTPException(status_code=400, detail="Serper rejected key.")
                 return {"ok": True, "message": "Serper verified & active!"}
             if prov == "gemini":
                 m = normalize_gemini_model(model or "gemini-2.5-flash")
-                res = await client.post(f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
-                                        headers={"x-goog-api-key": key},
-                                        json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}})
+                res = await client.post(
+                    f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
+                    headers={"x-goog-api-key": key},
+                    json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}},
+                )
                 if res.status_code != 200:
                     raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
                 return {"ok": True, "message": f"Gemini verified ({model or m})!"}
@@ -1440,9 +1431,13 @@ async def test_key(req: TestKeyRequest):
                 await _post_healing(client, prov, base + "/chat/completions", {"Authorization": f"Bearer {key}"}, payload)
                 return {"ok": True, "message": f"{prov.title()} verified!"}
             if prov == "anthropic":
-                await _post_healing(client, "anthropic", "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)",
-                                    {"x-api-key": key, "anthropic-version": "2023-06-01"},
-                                    {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]})
+                await _post_healing(
+                    client,
+                    "anthropic",
+                    "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)",
+                    {"x-api-key": key, "anthropic-version": "2023-06-01"},
+                    {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]},
+                )
                 return {"ok": True, "message": "Anthropic verified!"}
             raise HTTPException(status_code=400, detail="Unknown provider")
         except HTTPException:
