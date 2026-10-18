@@ -123,7 +123,7 @@ h2::before{content:"";width:5px;height:24px;border-radius:3px;background:var(--g
 .steps3 div{position:relative;padding:14px;background:linear-gradient(90deg,var(--soft),#fff);border:1px solid var(--ln);border-top:2px solid var(--gl);border-radius:6px;color:var(--mut);transition:transform .3s var(--ease)}
 .steps3 div:hover{transform:translateY(-2px)}
 .steps3 div::before{content:"";position:absolute;left:0;right:0;top:-2px;height:2px;background:var(--g);transform-origin:left;animation:draw .7s var(--ease) both}
-.steps3 div:nth-child(1)::before{animation-delay:.7s}.steps3 div:nth-child(2)::before{animation-delay:1s}.steps3 div:nth-child(3)::before{animation-delay:1.3s}
+.steps3 div:nth-child(1)::before{animation-delay:.7s}.steps3 div:nth-child(2)::before{animation-delay:.1s}.steps3 div:nth-child(3)::before{animation-delay:1.3s}
 .steps3 b{color:var(--g)}
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:start}
 @media(max-width:900px){.two{grid-template-columns:1fr}}
@@ -133,9 +133,17 @@ textarea:focus{border-color:var(--g);outline:2px solid var(--gl);outline-offset:
 .chips{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}.chip{font:inherit;font-size:13px;border:1px solid var(--ln);background:var(--soft);color:var(--ink);border-radius:5px;padding:4px 10px;cursor:pointer;transition:background .2s,border-color .2s,color .2s;animation:up .4s var(--ease) both}.chip:hover{border-color:var(--g);background:var(--tint);color:var(--gh)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row .sp{flex:1}
 label.ck{display:flex;gap:7px;align-items:center;color:var(--mut);font-size:13px;cursor:pointer}label.ck input{accent-color:var(--g)}
+.sel-cat{font:inherit;font-size:13px;color:var(--ink);background:var(--soft);border:1px solid var(--ln);border-radius:6px;padding:4px 9px;outline:0;cursor:pointer}
+.sel-cat:focus{border-color:var(--g)}
+.rev-box{margin-top:12px;padding-top:12px;border-top:1px dashed var(--ln);display:flex;gap:8px;align-items:center}
+.rev-box input{flex:1;min-width:0;font:inherit;font-size:13.5px;color:var(--ink);background:var(--bg);border:1px solid var(--ln);border-radius:6px;padding:7px 11px;outline:0}
+.rev-box input:focus{border-color:var(--g);outline:2px solid var(--gl)}
+.pal-row{display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap}
+.pal-sw{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-family:ui-monospace,monospace;background:var(--soft);border:1px solid var(--ln);border-radius:4px;padding:1px 6px}
+.pal-sw i{width:10px;height:10px;border-radius:2px;display:inline-block;border:1px solid rgba(0,0,0,.12)}
 .prog{height:3px;border-radius:3px;background:var(--ln);overflow:hidden;margin-top:14px}
 .prog i{display:block;height:100%;width:0;background:var(--g);border-radius:3px;transition:width .3s var(--ease)}
-#steps{margin-top:12px;max-height:220px;overflow:auto;font-size:13.5px}#steps div{padding:3px 0;color:var(--mut);animation:up .3s var(--ease) both}#steps .ok{color:var(--g);font-weight:600}#steps .bad{color:var(--bad)}
+#steps{margin-top:12px;max-height:240px;overflow:auto;font-size:13.5px}#steps div{padding:3px 0;color:var(--mut);animation:up .3s var(--ease) both}#steps .ok{color:var(--g);font-weight:600}#steps .bad{color:var(--bad)}
 
 /* result card */
 .stage{position:relative;border-radius:5px;overflow:hidden;background:linear-gradient(90deg,var(--tint),#fff 75%);border:1px solid var(--ln);cursor:grab;touch-action:none}
@@ -366,7 +374,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
 </div>
 <aside class="side"><div class="logo" data-go="overview"><i data-i="parts"></i>Verdant 3D</div>
 <div class="nav"><i class="nav-ind n"></i><button data-go="overview" class="on"><span data-i="home"></span>Overview</button><button data-go="ai"><span data-i="ai"></span>AI Builder</button><button data-go="parts"><span data-i="parts"></span>Parts</button><button data-go="library"><span data-i="library"></span>Library</button><button data-go="pricing"><span data-i="pricing"></span>Pricing</button></div>
-<div class="sfoot">Current model<br><b id="cnt">0 parts</b><div class="meter" title="Model size (the AI builds up to about 130 parts)"><i id="meter"></i></div><button class="btn pri sm" data-go="pricing" style="margin-top:10px;width:100%">Upgrade</button></div></aside>
+<div class="sfoot">Current model<br><b id="cnt">0 parts</b><div class="meter" title="Model size (the AI builds up to about 155 parts)"><i id="meter"></i></div><button class="btn pri sm" data-go="pricing" style="margin-top:10px;width:100%">Upgrade</button></div></aside>
 
 <main>
 <section class="page on" id="p-overview"><div class="stag">
@@ -390,7 +398,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
 <button class="card tile" data-go="library"><div class="ic" data-i="library"></div><b>Library</b><span>Start from ready-made models and make them yours.</span></button></div>
 <div class="steps3"><div><b>1 · Describe</b><br>Say what you want in your own words.</div><div><b>2 · Adjust</b><br>Resize, move and smooth any part.</div><div><b>3 · Enjoy</b><br>Look around your model from every angle.</div></div></div></section>
 
-<section class="page" id="p-ai"><h2>AI Builder</h2><p class="sub">Describe a model — Serper AI researches what it looks like on the web and the AI builds it part by part.</p>
+<section class="page" id="p-ai"><h2>AI Builder</h2><p class="sub">Describe a model — Serper AI researches what it looks like on the web and the v13 Sculptor builds it part by part.</p>
 
 <section class="eng" id="eng" aria-labelledby="eng-t">
  <svg class="fx" id="fx" aria-hidden="true"></svg>
@@ -414,15 +422,32 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
     <div class="eng-r">
      <div class="elab" id="mlab">Model / Search Mode</div>
      <div class="mlist" id="mlist" role="radiogroup" aria-labelledby="mlab"></div>
-     <div class="mcus"><label class="elab" for="mcus">Use another model id</label><input id="mcus" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type any model id, then press Enter"></div>
+     <div class="mcus"><label class="elab" for="mcus">Use another model id</label><input id="mcus" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. gemini-3.8-flash, gemini-2.5-flash, gpt-4o"></div>
     </div>
    </div>
   </div></div>
  </div>
 </section>
-<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a clean low-poly Roblox tree, a sleek sci-fi hover car, or a stylized sword"></textarea>
+<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a giant purple kraken squid, a red fire dragon, a sleek sports car, or a medieval watchtower"></textarea>
 <div class="chips" id="chips"></div>
+<div class="row" style="margin-bottom:8px">
+ <select class="sel-cat" id="cat-sel" title="Blueprint category">
+  <option value="">Category: Auto-detect</option>
+  <option value="creature">Creature / Animal</option>
+  <option value="humanoid">Humanoid / Mech</option>
+  <option value="vehicle">Vehicle / Craft</option>
+  <option value="structure">Structure / Building</option>
+  <option value="plant">Plant / Tree</option>
+  <option value="prop">Prop / Weapon</option>
+ </select>
+ <label class="ck"><input type="checkbox" id="auto-revise" checked>Auto-revise quality</label>
+ <label class="ck"><input type="checkbox" id="tonal-var" checked>Tonal variation</label>
+</div>
 <div class="row"><label class="ck"><input type="checkbox" id="keep">Add to current model</label><label class="ck"><input type="checkbox" id="use-serper" checked>Use Serper web search</label><span class="sp"></span><button class="btn pri" id="build">Build with AI</button></div>
+<div class="rev-box" id="rev-box">
+ <input id="rev-inp" type="text" placeholder="Revise current model (e.g. add glowing gold armor or make wings wider)…">
+ <button class="btn sm pri" id="rev-btn" type="button">Revise</button>
+</div>
 <div class="prog" id="prog"><i></i></div>
 <div id="steps"></div></div><div id="slot-ai"></div></div></section>
 
@@ -506,6 +531,8 @@ const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,4/3,.1,200),wor
 scene.add(new THREE.HemisphereLight(0xffffff,0x9fe8c0,1));const sun=new THREE.DirectionalLight(0xffffff,.85);sun.position.set(5,9,6);scene.add(sun);
 const floor=new THREE.Mesh(new THREE.CircleGeometry(4.5,48),new THREE.MeshBasicMaterial({color:0x8fe3a9,transparent:true,opacity:.28}));floor.rotation.x=-Math.PI/2;scene.add(floor);
 const parts=new Map(),view={az:.8,el:.45,d:7,tx:0,ty:.8,tz:0,gd:7,gx:0,gy:.8,gz:0};let spin=true,sel=null;
+let lastBuildMeta={prompt:'',category:'',scene_scale:0.28};
+
 function geo(u){const{k,w,h,z,s}=u,seg=Math.round(8+s*40);let g;
  if(k=='box'){const r=s*Math.min(w,h,z)/2*.98,a=new THREE.Vector3(w/2-r,h/2-r,z/2-r),na=a.clone().negate();g=new THREE.BoxGeometry(w,h,z,6,6,6);
   const p=g.attributes.position,n=g.attributes.normal,v=new THREE.Vector3(),c=new THREE.Vector3();
@@ -517,9 +544,9 @@ function mk(u,p,r,quiet){const m=new THREE.Mesh(geo(u),new THREE.MeshStandardMat
  m.userData={u,pop:quiet?1:0};m.position.fromArray(p);if(r)m.rotation.set(...r);m.scale.setScalar(quiet?1:.01);world.add(m);return m}
 function wipe(){parts.forEach(m=>{world.remove(m);m.geometry.dispose();m.material.dispose()});parts.clear();sel=null}
 const SH=['box','sphere','cylinder','cone','torus'];
-function normShape(s){s=String(s||'box').toLowerCase();if(s=='ball'||s=='ellipsoid')return'sphere';if(s=='tube'||s=='pillar'||s=='rod')return'cylinder';if(s=='pyramid'||s=='roof'||s=='wedge')return'cone';if(s=='ring'||s=='donut')return'torus';return SH.includes(s)?s:'box'}
-function uniq(id){id=String(id||'part').slice(0,40);const b=id;let i=2;while(parts.has(id))id=b+' '+i++;return id}
-function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.04))),c:hex(o.color)};
+function normShape(s){s=String(s||'box').toLowerCase();if(s=='ball'||s=='ellipsoid'||s=='dome'||s=='lobe'||s=='capsule'||s=='ovoid')return'sphere';if(s=='tube'||s=='pillar'||s=='rod'||s=='disc'||s=='disk'||s=='wheel'||s=='tire'||s=='tyre'||s=='barrel'||s=='shaft')return'cylinder';if(s=='pyramid'||s=='spike'||s=='horn'||s=='fang'||s=='tooth')return'cone';if(s=='ring'||s=='donut'||s=='hoop'||s=='collar')return'torus';return SH.includes(s)?s:'box'}
+function uniq(id){id=String(id||'part').slice(0,40);const b=id;let i=2;while(parts.has(id))id=b+'_'+i++;return id}
+function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.18))),c:hex(o.color)};
  const id=uniq(o.id||o.name||sh),m=mk(u,vec(o.pos||o.position,[0,s[1]/2,0]),(o.rot||o.rotation)?rad(o.rot||o.rotation):null,quiet);parts.set(id,m);return id}
 function apply(o){if(!o||typeof o!='object')throw Error('empty');const op=String(o.op||'add').toLowerCase();const g=()=>{const m=parts.get(o.id);if(!m)throw Error('missing '+o.id);return m};
  switch(op){case'add':return'Added '+addPart(o);
@@ -531,6 +558,23 @@ function apply(o){if(!o||typeof o!='object')throw Error('empty');const op=String
  case'color':{const m=g();m.userData.u.c=hex(o.color);m.material.color.set(m.userData.u.c);return'Painted '+o.id}
  case'remove':{const m=g();world.remove(m);parts.delete(o.id);return'Removed '+o.id}
  case'clear':wipe();return'Cleared the model';default:return'Added '+addPart(o)}}
+function exportCurrentOps(){
+ const out=[];
+ parts.forEach((m,id)=>{
+  const u=m.userData.u;
+  out.push({
+   op:'add',
+   id,
+   shape:u.k,
+   size:[+u.w.toFixed(3),+u.h.toFixed(3),+u.z.toFixed(3)],
+   pos:[+m.position.x.toFixed(3),+m.position.y.toFixed(3),+m.position.z.toFixed(3)],
+   rot:[+(m.rotation.x*180/Math.PI).toFixed(1),+(m.rotation.y*180/Math.PI).toFixed(1),+(m.rotation.z*180/Math.PI).toFixed(1)],
+   color:u.c,
+   smooth:+u.s.toFixed(3)
+  });
+ });
+ return out;
+}
 function fit(){const b=new THREE.Box3().setFromObject(world);if(b.isEmpty()){Object.assign(view,{gd:7,gx:0,gy:.8,gz:0});return}
  const c=b.getCenter(new THREE.Vector3());Object.assign(view,{gx:c.x,gy:c.y,gz:c.z,gd:Math.max(5,b.getSize(new THREE.Vector3()).length()*1.7)})}
 const ctx=$('#out').getContext('2d');
@@ -552,7 +596,7 @@ const F=[['Width','w',.1,6,.05],['Height','h',.1,6,.05],['Depth','z',.1,6,.05],[
 const gv=(m,k)=>k=='x'?m.position.x:k=='y'?m.position.y:k=='pz'?m.position.z:k=='ry'?((m.rotation.y*180/Math.PI)%360+360)%360:m.userData.u[k];
 function sv(m,k,v){if(k=='x')m.position.x=v;else if(k=='y')m.position.y=v;else if(k=='pz')m.position.z=v;else if(k=='ry')m.rotation.y=v*Math.PI/180;else{m.userData.u[k]=v;rebuild(m)}}
 const COLS=['#ffffff','#e6f8ed','#8fe3a9','#3fbf7f','#27c4d8','#a8f0f5','#a8754f','#2b3a36'];
-function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/60*100)+'%';$('#empty').style.opacity=n?0:1;
+function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/130*100)+'%';$('#empty').style.opacity=n?0:1;
  const pl=$('#plist'),ps=pl.scrollTop;pl.innerHTML='';if(!n)pl.innerHTML='<div class="hint">No parts yet. Add a shape above or use the AI Builder.</div>';
  parts.forEach((m,id)=>{const b=document.createElement('button');b.className='pi'+(id==sel?' on':'');const i=document.createElement('i');i.style.background=m.userData.u.c;b.append(i,id);b.onclick=()=>select(id);pl.appendChild(b)});pl.scrollTop=ps;
  const ins=$('#insp'),m=parts.get(sel);
@@ -573,44 +617,51 @@ function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' pa
  b.onclick=()=>{const n=parts.size,id=addPart({id:l,shape:k,size:[1,1,1],pos:[(n%4-1.5)*1.4,.5,(Math.floor(n/4)%3-1)*1.4]});snap();fit();select(id)};$('#shapes').appendChild(b)});
 $('#undo').onclick=undo;$('#clear').onclick=()=>{wipe();snap();fit();refresh()};
 
-/* ═══ AI Builder + Roblox Game-Ready Minimalist Skill ═══ */
-const SYS0=`You are a senior Roblox builder who assembles dense, hand-crafted, toy-grade models from primitive parts. Reply with ONLY valid JSON (no markdown): {"title":"Name","ops":[{"op":"add","id":"Group_Part","shape":"box|sphere|cylinder|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.04}]}.
+/* ═══ AI Builder + Fallback Offline Skill (mirrors server.py v13 laws) ═══ */
+const SYS0=`You are the VERDANT SCULPTOR: a principal 3D studio artist and master builder who constructs articulated, richly detailed, toy-grade 3D models out of primitive shapes. Reply with ONLY valid JSON (no markdown): {"title":"Name","category":"creature|humanoid|vehicle|structure|prop|plant","ops":[{"op":"add","id":"Group_Part","shape":"box|sphere|cylinder|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.45}]}.
 LAWS:
-1. DENSITY: 80 to 110 parts. Split every big mass into 2-4 layered pieces and add trim, panels, lights, buttons, tufts, straps. Never a few stretched blocks.
+1. DENSITY: 80 to 120 parts. Split every big mass into 2-4 layered pieces and add trim, panels, lights, buttons, tufts, straps.
 2. UNITS: meters, Y is up, ground y=0, centered on x=0 z=0, front faces +Z. Whole model 5-10 m long; each part size 0.05-8; positions within +-12.
-3. NOTHING FLOATS: every part overlaps or touches a neighbour; embed joints slightly.
-4. NO FLICKER: two boxes never share a coplanar face; decals, eyes, windows and stripes sit 0.02 m proud of the surface they decorate.
-5. CURVES ARE CHAINS: necks, tails, horns, wings, arms, tentacles are chains of 4-8 smaller parts, each rotated 8-25 degrees more than the last, tapering 10-20 percent per segment. Cylinders and cones stand on Y: lay a cylinder along X with rot [0,0,90], along Z with rot [90,0,0] (wheels).
-6. SYMMETRY: mirror left/right exactly, name pairs _L and _R. Anything alive gets eyes (white + pupil), nose or beak, mouth.
-7. PALETTE: 4-6 flat saturated colors, base color on at least half the parts, dark for eyes/tyres/trim, light for belly/teeth.
-8. PROPORTIONS: a car body is about 2.5 wheel-diameters tall; a character is 4-6 head-heights tall.
-9. SIGNATURE: list 6 traits that make the subject recognisable and build each as its own named part.`;
-const EX=['A clean low-poly Roblox tree','A sleek sci-fi hover car','A stylized fantasy sword','A low-poly stone chest','A cartoon mushroom house','A neon cyber helmet'];
+3. CYLINDER & CONE AXIS RULE: In Three.js, cylinder and cone always have length along local Y (size[1]) and circular diameter on size[0] and size[2] (keep size[0] == size[2]). To orient along Z, use rot [90,0,0]; along X (like wheels), use rot [0,0,90].
+4. CONNECTED ARTICULATED CHAINS (ZERO FLOATING PARTS): Every limb, tentacle, arm, leg, tail, or neck must be an unbroken chain of overlapping segments (Name_Seg1..4).
+5. SMOOTHNESS & ORGANIC FORM: Use smooth 0.55-0.75 on spheres/cylinders/cones for creatures and foliage; 0.25-0.45 on bevelled body boxes.`;
+
+const EX=['A giant purple kraken squid','A fierce red fire dragon','A sleek aerodynamic sports car','A medieval stone watchtower','A heroic armored mech knight','A glowing fantasy crystal tree'];
 EX.forEach((t,i)=>{const c=document.createElement('button');c.className='chip';c.textContent=t;c.style.animationDelay=(i*60+120)+'ms';c.onclick=()=>{$('#prompt').value=t;$('#prompt').focus()};$('#chips').appendChild(c)});
 const step=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
+const stepHTML=(h,c)=>{const d=document.createElement('div');if(c)d.className=c;d.innerHTML=h;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
 function progSet(p,instant){const e=$('#prog i');if(instant){e.style.transition='none';e.style.width=p+'%';void e.offsetWidth;e.style.transition=''}else e.style.width=p+'%'}
 let token=0;
-async function runOps(ops,gap){
+async function runOps(ops){
  const my=++token;let bad=0;
  for(const [n,o] of ops.entries()){
   if(my!=token)return;
   try{
    const l=apply(o);
-   if(n%3===0)step('✓ '+l);
+   if(n%4===0)step('✓ '+l);
   }catch(e){bad++;}
   progSet((n+1)/ops.length*100);
   if(n%5===0 || n===ops.length-1){fit();refresh();}
-  await sleep(12);
+  await sleep(10);
  }
  return bad;
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+/* ═══ Providers & Models (Synced with server.py v13 aliases & defaults) ═══ */
 const PV={
  serper:{name:'Serper',get:'https://serper.dev/api-key',ph:'Paste Serper.dev API key…',def:'serper-web-5',
   fb:[['serper-web-5','Serper Web Search (Top 5)','Recommended'],['serper-deep-10','Serper Deep Context (Top 10)','Rich Anatomy'],['serper-kg','Serper Knowledge Graph','Fast Facts']]},
- gemini:{name:'Gemini',get:'https://aistudio.google.com/app/apikey',ph:'AIza…',def:'gemini-3.1-pro-preview',
-  fb:[['gemini-3.1-pro-preview','Gemini 3.1 Pro Preview','Most capable'],['gemini-3-flash-preview','Gemini 3 Flash Preview','Recommended'],['gemini-2.5-flash','Gemini 2.5 Flash','Fast'],['gemini-2.5-flash-lite','Gemini 2.5 Flash-Lite','Lightest']]},
+ gemini:{name:'Gemini',get:'https://aistudio.google.com/app/apikey',ph:'AIza…',def:'gemini-2.5-flash',
+  fb:[
+   ['gemini-2.5-flash','Gemini 2.5 Flash','Recommended (v13)'],
+   ['gemini-3.8-flash','Gemini 3.8 Flash','v13 Alias → 2.5 Flash'],
+   ['gemini-3.7-flash','Gemini 3.7 Flash','v13 Alias → 2.5 Flash'],
+   ['gemini-3.6-flash','Gemini 3.6 Flash','v13 Alias → 2.5 Flash'],
+   ['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite','Fastest'],
+   ['gemini-2.5-pro','Gemini 2.5 Pro','Deep Reasoning'],
+   ['gemini-2.5-flash-lite','Gemini 2.5 Flash-Lite','Lightest']
+  ]},
  groq:{name:'Groq',get:'https://console.groq.com/keys',ph:'gsk_…',def:'llama-3.3-70b-versatile',
   fb:[['llama-3.3-70b-versatile','Llama 3.3 70B','Fastest & Smart'],['llama-3.1-8b-instant','Llama 3.1 8B','Instant'],['deepseek-r1-distill-llama-70b','DeepSeek R1 70B','Reasoning'],['qwen-qwq-32b','Qwen QwQ 32B','3D & Math']]},
  anthropic:{name:'Anthropic',get:'https://console.anthropic.com/settings/keys',ph:'sk-ant-…',def:'claude-sonnet-4-20250514',
@@ -618,6 +669,16 @@ const PV={
  openai:{name:'OpenAI',get:'https://platform.openai.com/api-keys',ph:'sk-…',def:'gpt-4o',
   fb:[['gpt-4o','GPT-4o','Flagship'],['gpt-4o-mini','GPT-4o Mini','Fast & Affordable'],['gpt-4.1','GPT-4.1','Smart'],['o3-mini','o3-mini','Reasoning']]}
 };
+
+function normalizeGeminiBrowserModel(m){
+ m=String(m||'gemini-2.5-flash').trim().toLowerCase();
+ if(/3\.[0-9]|3-flash/.test(m)){
+  if(m.includes('lite'))return'gemini-2.5-flash-lite';
+  if(m.includes('pro'))return'gemini-2.5-pro';
+  return'gemini-2.5-flash';
+ }
+ return m;
+}
 
 function detectProviderFromKey(k){
  k=(k||'').trim();
@@ -632,13 +693,30 @@ function detectProviderFromKey(k){
 async function api(url,opt,ms){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms||90000);let r;
  try{r=await fetch(url,{...opt,signal:c.signal})}catch(e){clearTimeout(t);throw{code:e&&e.name=='AbortError'?'timeout':'net'}}
  let j=null,raw='';try{raw=await r.text();j=JSON.parse(raw)}catch(e){}clearTimeout(t);
- if(!r.ok){const m=j&&(j.error&&(j.error.message||j.error)||j.message)||raw,s=typeof m=='string'?m:JSON.stringify(m||'');
-  throw{code:r.status==401||r.status==403||(r.status==400&&/api_key|api key|x-api-key|authentication|invalid key|unauthorized/i.test(s))?'badkey':r.status==404?'nomodel':r.status==429?'rate_limited':'api',status:r.status,msg:s.slice(0,220)}}
+ if(!r.ok){const m=j&&(j.error&&(j.error.message||j.error)||j.detail||j.message)||raw,s=typeof m=='string'?m:JSON.stringify(m||'');
+  throw{code:r.status==401||r.status==403||(r.status==400&&/api_key|api key|x-api-key|authentication|invalid key|unauthorized|rejected/i.test(s))?'badkey':r.status==404?'nomodel':r.status==429?'rate_limited':'api',status:r.status,msg:s.slice(0,260)}}
  return j||{}}
+
+async function testKeyViaServer(prov,key,model){
+ if(location.protocol==='file:')return null;
+ try{
+  const j=await api('/test-key',{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({provider:prov,api_key:key,model:model||''})
+  },22000);
+  if(j&&j.ok)return j;
+ }catch(e){
+  if(e&&(e.code=='badkey'||e.status==400))throw e;
+ }
+ return null;
+}
 
 const H={
  serper:{
   async list(k){
+   const srv=await testKeyViaServer('serper',k,'');
+   if(srv)return PV.serper.fb;
    await api('https://google.serper.dev/search',{
     method:'POST',
     headers:{'X-API-KEY':k,'Content-Type':'application/json'},
@@ -670,46 +748,61 @@ const H={
  },
  gemini:{
   async list(k){
-   const u='https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key='+encodeURIComponent(k);
-   const j=await api(u,{},20000);
-   const out=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!/image|tts|embed|aqa|imagen|veo|live|audio|robotics|computer|learnlm|vision|2\.5-pro/i.test(m.name))
-    .map(m=>{const id=m.name.replace(/^models\//,'');return[id,m.displayName||id,'']})
-    .sort((a,b)=>(/2\.5-flash$|3\.1-pro/.test(b[0])-/2\.5-flash$|3\.1-pro/.test(a[0]))||(a[0]<b[0]?1:-1));
-   return out.length?out:PV.gemini.fb;
+   await testKeyViaServer('gemini',k,mod('gemini'));
+   try{
+    const u='https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key='+encodeURIComponent(k);
+    const j=await api(u,{},18000);
+    const live=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!/image|tts|embed|aqa|imagen|veo|live|audio|robotics|computer|learnlm|vision/i.test(m.name))
+     .map(m=>{const id=m.name.replace(/^models\//,'');return[id,m.displayName||id,'']});
+    const merged=[...PV.gemini.fb];
+    live.forEach(r=>{if(!merged.some(x=>x[0]==r[0]))merged.push(r)});
+    return merged;
+   }catch(e){
+    if(e.code=='badkey')throw e;
+    return PV.gemini.fb;
+   }
   },
   async ask(k,m,sys,t){
-   if(m==='gemini-2.5-pro')m='gemini-3.1-pro-preview';
-   const u='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(m)+':generateContent?key='+encodeURIComponent(k);
+   const realModel=normalizeGeminiBrowserModel(m);
+   const u='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(realModel)+':generateContent?key='+encodeURIComponent(k);
    let j;
    try{
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.3,maxOutputTokens:8192}})});
+     body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.32,maxOutputTokens:16384}})});
    }catch(e){
-    if(m!='gemini-2.5-flash')return H.gemini.ask(k,'gemini-2.5-flash',sys,t);
+    if(realModel!='gemini-2.5-flash')return H.gemini.ask(k,'gemini-2.5-flash',sys,t);
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.3,maxOutputTokens:8192}})});
+     body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.32,maxOutputTokens:8192}})});
    }
-   const c=(j.candidates||[])[0];return((c&&c.content&&c.content.parts)||[]).map(p=>p.text||'').join('');
+   const c=(j.candidates||[])[0];return((c&&c.content&&c.content.parts)||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
   }
  },
  groq:{
   hd:k=>({Authorization:'Bearer '+k}),
   async list(k){
-   const j=await api('https://api.groq.com/openai/v1/models',{headers:H.groq.hd(k)},20000);
-   const out=(j.data||[]).filter(m=>!/whisper|guard|tts|embed|vision|audio/i.test(m.id)).map(m=>[m.id,m.id,'']);
-   return out.length?out:PV.groq.fb;
+   const srv=await testKeyViaServer('groq',k,mod('groq'));
+   try{
+    const j=await api('https://api.groq.com/openai/v1/models',{headers:H.groq.hd(k)},18000);
+    const out=(j.data||[]).filter(m=>!/whisper|guard|tts|embed|vision|audio/i.test(m.id)).map(m=>[m.id,m.id,'']);
+    return out.length?out:PV.groq.fb;
+   }catch(e){
+    if(srv)return PV.groq.fb;
+    throw e;
+   }
   },
   async ask(k,m,sys,t){
    const j=await api('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{...H.groq.hd(k),'Content-Type':'application/json'},
-    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],temperature:0.3,max_tokens:8192,response_format:{type:'json_object'}})});
+    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],temperature:0.32,max_tokens:8192,response_format:{type:'json_object'}})});
    return(((j.choices||[])[0]||{}).message||{}).content||'';
   }
  },
  anthropic:{
   hd:k=>({'x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'}),
   async list(k){
+   const srv=await testKeyViaServer('anthropic',k,mod('anthropic'));
+   if(srv)return PV.anthropic.fb;
    try{
-    const j=await api('https://api.anthropic.com/v1/models?limit=100',{headers:H.anthropic.hd(k)},20000);
+    const j=await api('https://api.anthropic.com/v1/models?limit=100',{headers:H.anthropic.hd(k)},18000);
     const out=(j.data||[]).map(m=>[m.id,m.display_name||m.id,'']);
     return out.length?out:PV.anthropic.fb;
    }catch(e){
@@ -719,38 +812,43 @@ const H={
   },
   async ask(k,m,sys,t){
    const j=await api('https://api.anthropic.com/v1/messages',{method:'POST',headers:{...H.anthropic.hd(k),'content-type':'application/json'},
-    body:JSON.stringify({model:m,max_tokens:8192,temperature:0.3,system:sys,messages:[{role:'user',content:t}]})});
+    body:JSON.stringify({model:m,max_tokens:12000,temperature:0.32,system:sys,messages:[{role:'user',content:t}]})});
    return(j.content||[]).filter(c=>c.type=='text').map(c=>c.text).join('');
   }
  },
  openai:{
   hd:k=>({Authorization:'Bearer '+k}),
   async list(k){
-   const j=await api('https://api.openai.com/v1/models',{headers:H.openai.hd(k)},20000);
-   const out=(j.data||[]).filter(m=>/^(gpt-4|gpt-5|o1|o3|o4|chatgpt-)/.test(m.id)&&!/audio|realtime|transcribe|tts|image|embed|moderation|search|instruct|whisper|dall/i.test(m.id))
-    .sort((a,b)=>(b.created||0)-(a.created||0)).map(m=>[m.id,m.id,'']);
-   return out.length?out:PV.openai.fb;
+   const srv=await testKeyViaServer('openai',k,mod('openai'));
+   try{
+    const j=await api('https://api.openai.com/v1/models',{headers:H.openai.hd(k)},18000);
+    const out=(j.data||[]).filter(m=>/^(gpt-4|gpt-5|o1|o3|o4|chatgpt-)/.test(m.id)&&!/audio|realtime|transcribe|tts|image|embed|moderation|search|instruct|whisper|dall/i.test(m.id))
+     .sort((a,b)=>(b.created||0)-(a.created||0)).map(m=>[m.id,m.id,'']);
+    return out.length?out:PV.openai.fb;
+   }catch(e){
+    if(srv)return PV.openai.fb;
+    throw e;
+   }
   },
   async ask(k,m,sys,t){
    const j=await api('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{...H.openai.hd(k),'Content-Type':'application/json'},
-    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],max_completion_tokens:8192,response_format:{type:'json_object'}})});
+    body:JSON.stringify({model:m,messages:[{role:'system',content:sys},{role:'user',content:t}],max_completion_tokens:12000,response_format:{type:'json_object'}})});
    return(((j.choices||[])[0]||{}).message||{}).content||'';
   }
  }
 };
 
-const AIK='verdant.ai.v3',AI={view:'serper',active:'',on:{},key:{},model:{},list:{},keep:true};
-(function load(){let c={};try{c=JSON.parse(localStorage.getItem(AIK)||localStorage.getItem('verdant.ai.v2')||'{}')||{}}catch(e){}
+const AIK='verdant.ai.v4',AI={view:'gemini',active:'',on:{},key:{},model:{},list:{},keep:true};
+(function load(){let c={};try{c=JSON.parse(localStorage.getItem(AIK)||localStorage.getItem('verdant.ai.v3')||localStorage.getItem('verdant.ai.v2')||'{}')||{}}catch(e){}
  const sget=n=>{try{return localStorage.getItem(n)||sessionStorage.getItem(n)||''}catch(e){return''}};
  AI.keep=c.keep!==undefined?!!c.keep:true;
  AI.model=c.model&&typeof c.model=='object'?c.model:{};
  AI.list=c.list&&typeof c.list=='object'?c.list:{};
  Object.keys(PV).forEach(p=>{
-  AI.key[p]=sget(AIK+'.'+p)||sget('verdant.ai.v2.'+p)||sget('verdant.ai.v1.'+p);
+  AI.key[p]=sget(AIK+'.'+p)||sget('verdant.ai.v3.'+p)||sget('verdant.ai.v2.'+p)||sget('verdant.ai.v1.'+p);
   AI.on[p]=!!AI.key[p];
-  if(AI.model[p]&&/gpt-5\.6|claude-.*-5-5|gemini-2\.5-pro/.test(AI.model[p]))delete AI.model[p];
  });
- AI.view=PV[c.view]?c.view:'serper';
+ AI.view=PV[c.view]?c.view:'gemini';
  AI.active=PV[c.active]&&AI.on[c.active]&&c.active!='serper'?c.active:(Object.keys(PV).find(p=>p!='serper'&&AI.on[p])||'')})();
 function save(){try{localStorage.setItem(AIK,JSON.stringify({view:AI.view,active:AI.active,model:AI.model,keep:AI.keep,list:AI.list}))}catch(e){}
  Object.keys(PV).forEach(p=>{const n=AIK+'.'+p,v=AI.key[p];try{localStorage.removeItem(n);sessionStorage.removeItem(n);if(v)(AI.keep?localStorage:sessionStorage).setItem(n,v)}catch(e){}})}
@@ -763,18 +861,31 @@ function models(p){const l=(Array.isArray(AI.list[p])&&AI.list[p].length?AI.list
 const say=(t,c)=>{EM.textContent=t||'';EM.className='emsg'+(c?' '+c:'')};
 let heatN=0;const heat=d=>{heatN=Math.max(0,heatN+d);eng.classList.toggle('hot',heatN>0)};
 
+let serverHealth={online:false,providers:[]};
+(async function checkHealth(){
+ if(location.protocol==='file:')return;
+ try{
+  const r=await fetch('/health');
+  if(r.ok){
+   const j=await r.json();
+   serverHealth={online:true,providers:j.providers||[],version:j.version||'v13'};
+   paintHead();
+  }
+ }catch(e){}
+})();
+
 function paintHead(){
  const llm=readyLLM(),srp=!!readySerper();
- eng.classList.toggle('lit',!!llm||srp);
- const llmLabel=llm?'<b>'+PV[llm].name+'</b> (<code>'+esc(mod(llm))+'</code>)':'<b>Built-in Cloud AI</b>';
+ eng.classList.toggle('lit',!!llm||srp||serverHealth.online);
+ const llmLabel=llm?'<b>'+PV[llm].name+'</b> (<code>'+esc(mod(llm))+'</code>)':(serverHealth.online?'<b>Verdant Server ('+(serverHealth.version||'v13')+')</b>':'<b>Built-in Cloud AI</b>');
  const srpLabel=srp?' + <b>Serper Web Search</b>':'';
  $('#eng-s').innerHTML='Building with '+llmLabel+srpLabel+'.';
  const pl=$('#epill');pl.classList.remove('off');
- pl.innerHTML='<i></i><span>'+(llm?'<b>'+PV[llm].name+'</b>':srp?'<b>Serper AI</b> + Cloud AI':'<b>Built-in AI</b>')+(srp&&llm?' + Serper':'')+'</span>';
+ pl.innerHTML='<i></i><span>'+(llm?'<b>'+PV[llm].name+'</b> · '+esc(mod(llm)):srp?'<b>Serper AI</b> + Server':'<b>Verdant v13 AI</b>')+(srp&&llm?' + Serper':'')+'</span>';
  $$('#etabs button').forEach(b=>{const p=b.dataset.p;b.setAttribute('aria-checked',p==AI.view);b.tabIndex=p==AI.view?0:-1;b.classList.toggle('cn',!!AI.on[p]);b.classList.toggle('u',p==llm||(p=='serper'&&srp));b.setAttribute('aria-label',PV[p].name+(AI.on[p]?', connected':''))});
  $('#etabs i').style.transform='translateX('+Object.keys(PV).indexOf(AI.view)*100+'%)';
 }
-function paintNote(){$('#enote').textContent='Your key stays in this browser. It is sent to your own Verdant server to build with '+PV[AI.view].name+' (straight to '+PV[AI.view].name+' if that server is offline) and is never stored there. '+(AI.keep?'It stays on this device until you remove it.':'It is forgotten when you close this tab.')}
+function paintNote(){$('#enote').textContent='Your key stays in this browser. It is sent to your Verdant v13 server to build with '+PV[AI.view].name+' (or directly to '+PV[AI.view].name+' if the server is offline) and is never stored on disk. '+(AI.keep?'It stays on this device until you remove it.':'It is forgotten when you close this tab.')}
 function paintKey(){const p=AI.view,P=PV[p];K.value=AI.key[p]||'';K.placeholder=P.ph;
  $('#klab').textContent=P.name+' API key';const g=$('#kget');g.innerHTML='Get a '+P.name+' key'+ico('ext');g.href=P.get;
  $('#kdel').hidden=!AI.key[p];$('#kgo').textContent=AI.on[p]?'Check again':'Connect';paintNote();say(AI.on[p]?'Connected to '+P.name+'.':'',AI.on[p]?'ok':'')}
@@ -853,6 +964,8 @@ const why=(e,p)=>{const n=p&&PV[p]?PV[p].name:'The AI',c=e&&e.code;
 async function fetchWebResearch(query){
  if(!$('#use-serper').checked)return '';
  const sk=readySerper();
+ /* If server.py is online, let server.py run its parallel dual-query Serper anatomical research */
+ if(serverHealth.online&&location.protocol!=='file:')return '';
  if(sk){
   try{
    step('Searching Google via Serper AI ('+mod('serper')+')…');
@@ -880,24 +993,52 @@ async function fetchWebResearch(query){
  return '';
 }
 
-async function askBuiltInCloudAI(fullPrompt,rawQuery){
+async function askServerGenerate(rawQuery,webContext,llm){
+ /* Sends the request to server.py (/generate) with a 175s timeout so v13's Cylinder Healer,
+    Kinematic Chain Stitcher, Two-Stage Floating Snapper, and Auto-Revise rounds complete cleanly. */
+ if(location.protocol==='file:')return null;
+ const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),175000);
  try{
+  const body={
+   prompt:rawQuery,
+   web_context:webContext||'',
+   use_serper:$('#use-serper').checked,
+   provider:llm||'',
+   model:llm?mod(llm):'',
+   api_key:llm?AI.key[llm]:'',
+   serper_key:readySerper(),
+   category:$('#cat-sel').value||'',
+   revise:$('#auto-revise').checked,
+   tonal_variation:$('#tonal-var').checked
+  };
   const r=await fetch('/generate',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({prompt:rawQuery,web_context:fullPrompt})
+   signal:ctl.signal,
+   body:JSON.stringify(body)
   });
-  if(r.ok){
-   const j=await r.json();
-   if(j&&Array.isArray(j.ops)&&j.ops.length)return JSON.stringify(j);
-   if(j&&Array.isArray(j.parts)&&j.parts.length){
-    return JSON.stringify({
-     title:j.name||rawQuery,
-     ops:j.parts.map(p=>({op:'add',id:p.n,shape:p.s,size:p.sz,pos:p.po,rot:p.ro,color:p.c,smooth:0.02}))
-    });
+  clearTimeout(tm);
+  if(!r.ok){
+   let detail='';
+   try{const ej=await r.json();detail=ej.detail||''}catch(_){}
+   if(r.status==401||r.status==403||r.status==429||r.status==422){
+    throw{code:r.status==429?'rate_limited':(r.status==401||r.status==403)?'badkey':'api',status:r.status,msg:detail};
    }
+   return null;
   }
- }catch(e){}
+  const j=await r.json();
+  if(j&&Array.isArray(j.ops)&&j.ops.length)return JSON.stringify(j);
+  return null;
+ }catch(e){
+  clearTimeout(tm);
+  if(e&&e.code&&e.code!=='net')throw e;
+  return null;
+ }
+}
+
+async function askBuiltInCloudAI(fullPrompt,rawQuery){
+ const viaSrv=await askServerGenerate(rawQuery,'','');
+ if(viaSrv)return viaSrv;
  try{
   const j=await api('https://text.pollinations.ai/openai',{
    method:'POST',
@@ -908,7 +1049,7 @@ async function askBuiltInCloudAI(fullPrompt,rawQuery){
     temperature:0.3,
     jsonMode:true
    })
-  },28000);
+  },45000);
   if(j&&Array.isArray(j.ops))return JSON.stringify(j);
   const msg=(((j.choices||[])[0]||{}).message||{}).content;
   if(msg&&msg.includes('{'))return msg;
@@ -916,40 +1057,17 @@ async function askBuiltInCloudAI(fullPrompt,rawQuery){
  throw{code:'net'};
 }
 
-async function askServer(rawQuery,webContext,llm){
- /* Sends the request to server.py (/generate) so EVERY provider gets the same dense-model prompt, checks and revise round.
-    Returns null when no Verdant server answers on this address, so the caller can fall back to a direct call. */
- if(location.protocol==='file:')return null;
- const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),45000);
- try{
-  const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},signal:ctl.signal,
-   body:JSON.stringify({prompt:rawQuery,web_context:webContext||'',use_serper:$('#use-serper').checked&&!webContext,
-    provider:llm,model:mod(llm),api_key:AI.key[llm],serper_key:readySerper()})});
-  clearTimeout(tm);
-  if(!r.ok)return null;
-  const j=await r.json();
-  if(j&&Array.isArray(j.ops)&&j.ops.length)return JSON.stringify(j);
-  return null;
- }catch(e){
-  clearTimeout(tm);
-  return null;
- }
-}
-
 async function askAI(rawQuery,webContext){
  if(K.value.trim()&&!AI.on[AI.view]){
   await connect();
  }
- const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate structure and colors): '+webContext:'');
  const llm=readyLLM();
+ const viaServer=await askServerGenerate(rawQuery,webContext,llm);
+ if(viaServer)return viaServer;
+
+ const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate structure and colors): '+webContext:'');
  if(llm){
-  const viaServer=await askServer(rawQuery,webContext,llm);
-  if(viaServer)return viaServer;
   return H[llm].ask(AI.key[llm],mod(llm),SYS0,fullPrompt);
- }
- if(window.claude){
-  const sample=await claude.use('sample');
-  if(sample){const r=await sample(SYS0+' '+fullPrompt,{cache:false});return r.text}
  }
  return askBuiltInCloudAI(fullPrompt,rawQuery);
 }
@@ -964,7 +1082,42 @@ function parseAIResponse(text){
  const rawOps=Array.isArray(j.ops)?j.ops:(Array.isArray(j.parts)?j.parts:[]);
  const ops=rawOps.filter(x=>x&&typeof x=='object').map(o=>({...o,op:o.op||'add'})).slice(0,160);
  if(!ops.length)throw{code:'empty'};
- return{title:j.title||j.name||'your model',ops,diagnostics:j.diagnostics||null};
+ return{
+  title:j.title||j.name||'your model',
+  category:j.category||'',
+  ops,
+  stats:j.stats||null,
+  diagnostics:j.diagnostics||null,
+  quality:j.quality||null,
+  plan:j.plan||null,
+  engine:j.engine||null,
+  used_serper:!!j.used_serper
+ };
+}
+
+function renderDiagnostics(parsed){
+ if(parsed.used_serper)step('🌐 Live Serper anatomical research applied','ok');
+ if(parsed.engine&&parsed.engine.provider){
+  step('🤖 Engine: '+parsed.engine.provider+' ('+(parsed.engine.model||'')+')');
+ }
+ if(parsed.plan&&typeof parsed.plan==='object'){
+  if(Array.isArray(parsed.plan.signature_features)&&parsed.plan.signature_features.length){
+   step('✨ Features: '+parsed.plan.signature_features.slice(0,6).join(' · '));
+  }
+  if(parsed.plan.palette&&typeof parsed.plan.palette==='object'){
+   const swatches=Object.entries(parsed.plan.palette).map(([k,v])=>'<span class="pal-sw"><i style="background:'+esc(v)+'"></i>'+esc(k)+'</span>').join('');
+   if(swatches)stepHTML('<div class="pal-row">🎨 Palette: '+swatches+'</div>');
+  }
+ }
+ if(parsed.diagnostics){
+  const d=parsed.diagnostics;
+  if(d.readout)step('📦 '+d.readout);
+  if(d.floating_check)step('🔗 '+d.floating_check);
+  if(d.overlap_check)step('⚡ '+d.overlap_check);
+  if(d.proportion_check)step('📐 '+d.proportion_check);
+  if(d.detail_check)step('🔍 '+d.detail_check);
+  if(d.quality)step('🏆 '+d.quality,'ok');
+ }
 }
 
 let busy=false;
@@ -972,34 +1125,82 @@ async function build(){
  const t=$('#prompt').value.trim();
  if(!t)return toast('Describe what you want to build first');
  if(busy)return;
- busy=true;$('#build').disabled=true;$('#build').textContent='Building…';$('#rc').classList.add('busy');$('#steps').innerHTML='';progSet(0,true);heat(1);
+ busy=true;$('#build').disabled=true;$('#rev-btn').disabled=true;$('#build').textContent='Building…';$('#rc').classList.add('busy');$('#steps').innerHTML='';progSet(0,true);heat(1);
  if(K.value.trim()&&!AI.on[AI.view]){await connect()}
  try{
   const webCtx=await fetchWebResearch(t);
   const via=readyLLM();
-  step('Building 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Built-in Cloud AI')+'…');
+  step('Sculpting 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Verdant v13 Cloud AI')+'…');
   const text=await askAI(t,webCtx);
   const parsed=parseAIResponse(text);
+  lastBuildMeta={
+   prompt:t,
+   category:parsed.category||$('#cat-sel').value||'',
+   scene_scale:(parsed.stats&&parsed.stats.scene_scale)||0.28
+  };
   const ops=parsed.ops;
   if(!$('#keep').checked)ops.unshift({op:'clear'});
   $('#rc').classList.remove('busy');
   await runOps(ops);
   snap();
-  if(parsed.diagnostics){
-   if(parsed.diagnostics.readout)step('📦 '+parsed.diagnostics.readout);
-   if(parsed.diagnostics.overlap_check)step('⚡ '+parsed.diagnostics.overlap_check);
-   if(parsed.diagnostics.proportion_check)step('📐 '+parsed.diagnostics.proportion_check);
-   if(parsed.diagnostics.quality)step('✅ '+parsed.diagnostics.quality);
-  }
+  renderDiagnostics(parsed);
   step('Done: '+parsed.title+'. Ready for your game!','ok');
  }catch(e){
   step(why(e,readyLLM()),'bad');
-  if(e&&e.msg)step(e.msg);
+  if(e&&e.msg)step(e.msg,'bad');
   progSet(0);
  }
- heat(-1);$('#rc').classList.remove('busy');$('#build').disabled=false;$('#build').textContent='Build with AI';busy=false;
+ heat(-1);$('#rc').classList.remove('busy');$('#build').disabled=false;$('#rev-btn').disabled=false;$('#build').textContent='Build with AI';busy=false;
 }
-$('#build').onclick=build;$('#prompt').onkeydown=e=>{if(e.key=='Enter'&&(e.ctrlKey||e.metaKey))build()};
+
+async function reviseModel(){
+ const instruction=$('#rev-inp').value.trim();
+ if(!instruction)return toast('Type a revision instruction first');
+ if(!parts.size)return toast('Build or open a model first before revising');
+ if(busy)return;
+ busy=true;$('#build').disabled=true;$('#rev-btn').disabled=true;$('#rev-btn').textContent='Revising…';$('#rc').classList.add('busy');$('#steps').innerHTML='';progSet(0,true);heat(1);
+ if(K.value.trim()&&!AI.on[AI.view]){await connect()}
+ const llm=readyLLM();
+ try{
+  step('Revising model ('+parts.size+' parts): "'+instruction+'"…');
+  const currentOps=exportCurrentOps();
+  const r=await api('/revise',{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({
+    instruction,
+    ops:currentOps,
+    prompt:lastBuildMeta.prompt||$('#prompt').value.trim()||'the current model',
+    category:$('#cat-sel').value||lastBuildMeta.category||'',
+    scene_scale:lastBuildMeta.scene_scale||0.28,
+    provider:llm||'',
+    model:llm?mod(llm):'',
+    api_key:llm?AI.key[llm]:'',
+    tonal_variation:$('#tonal-var').checked
+   })
+  },165000);
+  const parsed=parseAIResponse(JSON.stringify(r));
+  lastBuildMeta.category=parsed.category||lastBuildMeta.category;
+  if(parsed.stats&&parsed.stats.scene_scale)lastBuildMeta.scene_scale=parsed.stats.scene_scale;
+  const ops=[{op:'clear'},...parsed.ops];
+  $('#rc').classList.remove('busy');
+  await runOps(ops);
+  snap();
+  renderDiagnostics(parsed);
+  $('#rev-inp').value='';
+  step('Revision complete: '+parsed.title,'ok');
+ }catch(e){
+  step(why(e,llm),'bad');
+  if(e&&e.msg)step(e.msg,'bad');
+  progSet(0);
+ }
+ heat(-1);$('#rc').classList.remove('busy');$('#build').disabled=false;$('#rev-btn').disabled=false;$('#rev-btn').textContent='Revise';busy=false;
+}
+
+$('#build').onclick=build;
+$('#prompt').onkeydown=e=>{if(e.key=='Enter'&&(e.ctrlKey||e.metaKey))build()};
+$('#rev-btn').onclick=reviseModel;
+$('#rev-inp').onkeydown=e=>{if(e.key=='Enter')reviseModel()};
 
 /* ═══ Library ═══ */
 const L=(k,s,p,c)=>[k,s,p,c],leg=(x,z,h,c)=>L('box',[.15,h,.15],[x,h/2,z],c);
@@ -1011,7 +1212,7 @@ const TPL={House:['home',[L('box',[2,1.2,2],[0,.6,0],'#ffffff'),L('cone',[3,1.1,
  Rocket:['rocket',[L('cylinder',[.9,2.4,.9],[0,1.4,0],'#ffffff'),L('cone',[.9,.9,.9],[0,3.05,0],'#27c4d8'),L('sphere',[.4,.4,.2],[0,1.9,.42],'#8fe3a9'),L('box',[.1,.7,.6],[-.55,.5,0],'#27c4d8'),L('box',[.1,.7,.6],[.55,.5,0],'#27c4d8')]]};
 Object.entries(TPL).forEach(([n,[ic,rows]])=>{const b=document.createElement('button');b.className='card tile';b.innerHTML='<div class="ic"></div><b></b><span></span>';
  b.children[0].innerHTML=ico(ic);b.children[1].textContent=n;b.children[2].textContent=rows.length+' parts · open in Parts';
- b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+' '+(i+1),shape:k,size:s,pos:p,color:c,smooth:.02})));snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
+ b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+'_'+(i+1),shape:k,size:s,pos:p,color:c,smooth:.18})));snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
 
 /* ═══ Result card + navigation ═══ */
 $$('[data-v]').forEach(b=>b.onclick=()=>{const[a,e]=b.dataset.v.split(',').map(Number);spin=false;$('#spin').classList.remove('on');view.az=a;view.el=e});
@@ -1027,7 +1228,7 @@ function go(n){$$('.page').forEach(p=>p.classList.toggle('on',p.id=='p-'+n));$$(
  $$('#p-'+n+' .stag>*').forEach((c,i)=>{c.style.animation='none';void c.offsetWidth;c.style.animation='';c.style.animationDelay=i*70+'ms'});scrollTo(0,0)}
 $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
 addEventListener('resize',navInd);
-addEventListener('keydown',e=>{if(/INPUT|TEXTAREA/.test(e.target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key=='z'){e.preventDefault();undo()}});
+addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key=='z'){e.preventDefault();undo()}});
 const tog=$('#tog');
 $$('#tog button').forEach(b=>b.onclick=()=>{const y=b.dataset.b=='y';tog.classList.toggle('y',y);$$('#tog button').forEach(x=>x.classList.toggle('on',x==b));
  $$('.amt').forEach(a=>{const from=+a.textContent.replace('$',''),to=+a.dataset[y?'y':'m'],t0=performance.now();const id=a._i=(a._i||0)+1;(function f(t){if(a._i!==id)return;const k=Math.min(1,Math.max(0,(t-t0)/380));a.textContent='$'+Math.round(from+(to-from)*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)})(t0)});
@@ -1046,8 +1247,7 @@ function demoRun(){dt.forEach(clearTimeout);dt=[];
  dt.push(setTimeout(demoRun,9400))}
 demoRun();
 go('overview');refresh();
-</script><!-- VERDANT 3D · POLISH LAYER
-     Paste this whole block into Verdant_3D_v4.html, right before the closing </body> tag. -->
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
 <style id="verdant-polish">
@@ -1113,7 +1313,7 @@ textarea{border-radius:10px;box-shadow:inset 0 1px 2px rgba(15,42,32,.05)}
 })();
 </script>
 <script>
-/* Editorial Sunlit Joinery Pavilion Intro (Replaces the AI chip city intro) */
+/* Editorial Sunlit Joinery Pavilion Intro */
 (()=>{
  const H=document.documentElement,I=document.getElementById('intro'),calm=matchMedia('(prefers-reduced-motion:reduce)').matches;
  let on=1,done=0,raf=0,RR;const T=[];
