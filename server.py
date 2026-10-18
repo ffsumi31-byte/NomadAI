@@ -684,26 +684,32 @@ def parse_llm_json(text: str) -> Dict[str, Any]:
     dec = json.JSONDecoder()
     for fix in (False, True):
         s = re.sub(r",\s*([}\]])", r"\1", t) if fix else t
-        starts = [x for x in (s.find("{"), s.find("[")) if x >= 0]
-        if not starts:
-            break
-        try:
-            obj, _ = dec.raw_decode(s[min(starts):])
-        except ValueError:
-            continue
-        if isinstance(obj, list):
-            obj = {"ops": obj}
-        if isinstance(obj, dict):
-            return obj
-    return salvage_ops(t)
-
-
-def _num(v: Any, d: float = 0.0) -> float:
-    try:
-        f = float(v)
-        return f if math.isfinite(f) else d
-    except (TypeError, ValueError):
-        return d
+        if prov == "serper":
+                res = await client.post("https://google.serper.dev/search", headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                                        json={"q": "3D low poly model", "num": 1})
+                if res.status_code != 200:
+                    raise HTTPException(status_code=400, detail="Serper rejected key.")
+                return {"ok": True, "message": "Serper verified & active!"}
+            if prov == "gemini":
+                m = normalize_gemini_model(model or "gemini-2.5-flash")
+                res = await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                                        headers={"x-goog-api-key": key},
+                                        json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}})
+                if res.status_code != 200:
+                    raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
+                return {"ok": True, "message": f"Gemini verified ({model or m})!"}
+            if prov in ("openai", "groq"):
+                base = "https://api.openai.com/v1" if prov == "openai" else "https://api.groq.com/openai/v1"
+                m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
+                payload: Dict[str, Any] = {"model": m, "messages": [{"role": "user", "content": "OK"}]}
+                payload["max_completion_tokens" if _is_reasoning(m) else "max_tokens"] = 64 if _is_reasoning(m) else 10
+                await _post_healing(client, prov, base + "/chat/completions", {"Authorization": f"Bearer {key}"}, payload)
+                return {"ok": True, "message": f"{prov.title()} verified!"}
+            if prov == "anthropic":
+                await _post_healing(client, "anthropic", "https://api.anthropic.com/v1/messages",
+                                    {"x-api-key": key, "anthropic-version": "2023-06-01"},
+                                    {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]})
+                return {"ok": True, "message": "Anthropic verified!"}
 
 
 def _vec3(v: Any, d: Tuple[float, float, float]) -> List[float]:
