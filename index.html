@@ -674,7 +674,7 @@ const H={
    const j=await api(u,{},20000);
    const out=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!/image|tts|embed|aqa|imagen|veo|live|audio|robotics|computer|learnlm|vision|2\.5-pro/i.test(m.name))
     .map(m=>{const id=m.name.replace(/^models\//,'');return[id,m.displayName||id,'']})
-    .sort((a,b)=>(/3\.1-pro|3-flash/.test(b[0])-/3\.1-pro|3-flash/.test(a[0]))||(a[0]<b[0]?1:-1));
+    .sort((a,b)=>(/2\.5-flash$|3\.1-pro/.test(b[0])-/2\.5-flash$|3\.1-pro/.test(a[0]))||(a[0]<b[0]?1:-1));
    return out.length?out:PV.gemini.fb;
   },
   async ask(k,m,sys,t){
@@ -685,7 +685,7 @@ const H={
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.3,maxOutputTokens:8192}})});
    }catch(e){
-    if((e.code=='nomodel'||e.status==404||e.status==400)&&m!='gemini-3.1-pro-preview')return H.gemini.ask(k,'gemini-3.1-pro-preview',sys,t);
+    if(m!='gemini-2.5-flash')return H.gemini.ask(k,'gemini-2.5-flash',sys,t);
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.3,maxOutputTokens:8192}})});
    }
@@ -866,7 +866,7 @@ async function fetchWebResearch(query){
   }
  }
  try{
-  const words=query.toLowerCase().replace(/[^a-z0-9 ]/g,'').split(/\s+/).filter(w=>w.length>2&&!/^(make|build|create|the|with|giant|small|big|cute)$/.test(w));
+  const words=query.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(w=>w.length>2&&!/^(make|build|create|the|with|giant|small|big|cute)$/.test(w));
   const subj=words[words.length-1]||query;
   const r=await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(subj));
   if(r.ok){
@@ -919,20 +919,21 @@ async function askBuiltInCloudAI(fullPrompt,rawQuery){
 async function askServer(rawQuery,webContext,llm){
  /* Sends the request to server.py (/generate) so EVERY provider gets the same dense-model prompt, checks and revise round.
     Returns null when no Verdant server answers on this address, so the caller can fall back to a direct call. */
- const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),300000);
- let r,raw='',j=null;
+ if(location.protocol==='file:')return null;
+ const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),45000);
  try{
-  r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},signal:ctl.signal,
+  const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},signal:ctl.signal,
    body:JSON.stringify({prompt:rawQuery,web_context:webContext||'',use_serper:$('#use-serper').checked&&!webContext,
     provider:llm,model:mod(llm),api_key:AI.key[llm],serper_key:readySerper()})});
-  raw=await r.text();
- }catch(e){clearTimeout(tm);if(e&&e.name=='AbortError')throw{code:'timeout'};return null}
- clearTimeout(tm);
- try{j=JSON.parse(raw)}catch(e){}
- if(r.ok&&j&&Array.isArray(j.ops)&&j.ops.length)return JSON.stringify(j);
- if(!j||(j.detail===undefined&&!r.ok))return null;
- const s=r.status,m=typeof j.detail=='string'?j.detail:JSON.stringify(j.detail||'');
- throw{code:s==401||s==403?'badkey':s==404?'nomodel':s==429?'rate_limited':s==422?'empty':'api',status:s,msg:m.slice(0,220)};
+  clearTimeout(tm);
+  if(!r.ok)return null;
+  const j=await r.json();
+  if(j&&Array.isArray(j.ops)&&j.ops.length)return JSON.stringify(j);
+  return null;
+ }catch(e){
+  clearTimeout(tm);
+  return null;
+ }
 }
 
 async function askAI(rawQuery,webContext){
@@ -941,7 +942,11 @@ async function askAI(rawQuery,webContext){
  }
  const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate structure and colors): '+webContext:'');
  const llm=readyLLM();
- if(llm){const viaServer=await askServer(rawQuery,webContext,llm);if(viaServer)return viaServer;return H[llm].ask(AI.key[llm],mod(llm),SYS0,fullPrompt)}
+ if(llm){
+  const viaServer=await askServer(rawQuery,webContext,llm);
+  if(viaServer)return viaServer;
+  return H[llm].ask(AI.key[llm],mod(llm),SYS0,fullPrompt);
+ }
  if(window.claude){
   const sample=await claude.use('sample');
   if(sample){const r=await sample(SYS0+' '+fullPrompt,{cache:false});return r.text}
