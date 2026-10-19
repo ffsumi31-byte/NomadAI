@@ -2,9 +2,8 @@
 Verdant 3D - studio-grade multi-AI backend (v13)
 
 Upgrades in v13:
-1. Full support for gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash,
-   gemini-3.5-flash-lite, and shorthand aliases with instant fallback across
-   gemini-2.5-flash, gemini-2.5-flash-lite, and gemini-2.0-flash.
+1. Full native support for gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash,
+   and gemini-3.5-flash-lite with automatic fallback across current Gemini 3.x models.
 2. Universal Cylinder & Cone Axis Orientation Healer: fixes cylinders/cones at
    ANY angle when the LLM puts length in X (size[0]) or Z (size[2]) instead of
    Three.js local Y (size[1]), preventing flat pancake discs and oval wheels.
@@ -47,7 +46,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
-AI_MODEL = os.getenv("AI_MODEL", "gemini-2.5-flash")
+AI_MODEL = os.getenv("AI_MODEL", "gemini-3.8-flash")
 
 DEFAULT_MODELS = {
     "gemini": AI_MODEL,
@@ -72,31 +71,31 @@ REVISE_BUDGET_S = 85.0
 RETRY_STATUS = (429, 500, 502, 503, 504, 529)
 
 GEMINI_MODEL_ALIASES = {
-    "3.8flash": "gemini-2.5-flash",
-    "3.8-flash": "gemini-2.5-flash",
-    "gemini-3.8-flash": "gemini-2.5-flash",
-    "gemini-3.8-flash-lite": "gemini-2.5-flash-lite",
-    "gemini-3.8-pro": "gemini-2.5-pro",
-    "3.7flash": "gemini-2.5-flash",
-    "3.7-flash": "gemini-2.5-flash",
-    "gemini-3.7-flash": "gemini-2.5-flash",
-    "gemini-3.7-flash-lite": "gemini-2.5-flash-lite",
-    "gemini-3.7-pro": "gemini-2.5-pro",
-    "3.6flash": "gemini-2.5-flash",
-    "3.6-flash": "gemini-2.5-flash",
-    "gemini-3.6-flash": "gemini-2.5-flash",
-    "3.5-flash": "gemini-2.5-flash",
-    "gemini-3.5-flash": "gemini-2.5-flash",
-    "gemini-3.5-flash-lite": "gemini-2.5-flash-lite",
-    "gemini-3.0-flash": "gemini-2.5-flash",
-    "gemini-3-flash-preview": "gemini-2.5-flash",
-    "gemini-3.1-pro-preview": "gemini-2.5-pro",
-    "gemini-2.5": "gemini-2.5-flash",
-    "gemini-2.5-flash-latest": "gemini-2.5-flash",
-    "gemini-2.5-pro-latest": "gemini-2.5-pro",
-    "gemini-1.5-flash": "gemini-2.5-flash",
-    "gemini-1.5-flash-latest": "gemini-2.5-flash",
-    "gemini-1.5-pro": "gemini-2.5-pro",
+    "3.8flash": "gemini-3.8-flash",
+    "3.8-flash": "gemini-3.8-flash",
+    "gemini-3.8-flash": "gemini-3.8-flash",
+    "3.7flash": "gemini-3.8-flash",
+    "3.7-flash": "gemini-3.8-flash",
+    "gemini-3.7-flash": "gemini-3.7-flash",
+    "3.6flash": "gemini-3.6-flash",
+    "3.6-flash": "gemini-3.6-flash",
+    "gemini-3.6-flash": "gemini-3.6-flash",
+    "3.5-flash": "gemini-3.5-flash",
+    "gemini-3.5-flash": "gemini-3.5-flash",
+    "gemini-3.5-flash-lite": "gemini-3.5-flash-lite",
+    "gemini-3.0-flash": "gemini-3.8-flash",
+    "gemini-3-flash-preview": "gemini-3.8-flash",
+    "gemini-3.1-pro-preview": "gemini-3.8-flash",
+    "gemini-2.5": "gemini-3.8-flash",
+    "gemini-2.5-flash": "gemini-3.8-flash",
+    "gemini-2.5-flash-latest": "gemini-3.8-flash",
+    "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+    "gemini-2.5-pro": "gemini-3.8-flash",
+    "gemini-2.5-pro-latest": "gemini-3.8-flash",
+    "gemini-2.0-flash": "gemini-3.8-flash",
+    "gemini-1.5-flash": "gemini-3.8-flash",
+    "gemini-1.5-flash-latest": "gemini-3.8-flash",
+    "gemini-1.5-pro": "gemini-3.8-flash",
 }
 
 STUD = 0.28               # metres per Roblox stud
@@ -265,7 +264,6 @@ def classify(prompt: str, hint: str = "") -> Tuple[str, str, bool, bool]:
     if hint in PART_RANGE:
         cat = hint
     else:
-        # Check creature sub-keywords FIRST so "giant purple squid with giant head" or "fire dragon" is never misclassified
         if any(re.search(SUB_KW[s], p) for s in ("dragon", "multi", "bird", "aquatic")):
             cat = "creature"
         else:
@@ -323,7 +321,7 @@ def build_revision_prompt(prompt: str, cat: str, lo: int, hi: int, parts: List[D
     return "\n".join(out)
 
 
-# --------------------------------------------------------------------------- providers & 3.7/3.8 flash support
+# --------------------------------------------------------------------------- providers & Gemini 3.8/3.7 support
 class ProviderError(Exception):
     def __init__(self, provider: str, status: int, message: str):
         super().__init__(message)
@@ -335,25 +333,16 @@ class ProviderError(Exception):
 
 
 def normalize_gemini_model(name: str) -> str:
-    """Safely map any custom or future Gemini alias (like 'gemini-3.8-flash', 'gemini-3.7-flash',
-    'gemini-3.6-flash', 'gemini-3.5-flash-lite') to a live Google API model ID so it never 404s."""
-    m = (name or "gemini-2.5-flash").strip().lower()
+    """Resolves model names and legacy 1.5/2.0/2.5 IDs to active Gemini 3.8 / 3.5 models."""
+    m = (name or "gemini-3.8-flash").strip().lower()
     if m.startswith("models/"):
         m = m.split("models/", 1)[1]
     if m in GEMINI_MODEL_ALIASES:
         return GEMINI_MODEL_ALIASES[m]
-    if re.search(r"3\.[0-9]", m) or any(x in m for x in ("3.8", "3.7", "3.6", "3.5", "3.1", "3-flash")):
-        if "lite" in m:
-            return "gemini-2.5-flash-lite"
-        if "pro" in m:
-            return "gemini-2.5-pro"
-        return "gemini-2.5-flash"
     if not m.startswith("gemini-"):
         if "lite" in m:
-            return "gemini-2.5-flash-lite"
-        if "pro" in m:
-            return "gemini-2.5-pro"
-        return "gemini-2.5-flash"
+            return "gemini-3.5-flash-lite"
+        return "gemini-3.8-flash"
     return m
 
 
@@ -443,21 +432,27 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     requested = (model or DEFAULT_MODELS["gemini"]).strip()
     primary = normalize_gemini_model(requested)
     chain: List[str] = []
-    for m in (primary, "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.5-pro"):
+    for m in (
+        primary,
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash",
+    ):
         if m and m not in chain:
             chain.append(m)
     last: Optional[ProviderError] = None
     for m in chain:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-        old_gen = any(t in m for t in ("1.5", "2.0"))
         gc: Dict[str, Any] = {
             "responseMimeType": "application/json",
             "temperature": 0.32,
-            "maxOutputTokens": 8192 if old_gen else 24576,
+            "maxOutputTokens": 24576,
         }
-        # Fast, focused thinking budget so 2.5-flash answers in ~12-18s without hitting browser timeouts
-        if "2.5" in m and "lite" not in m:
-            gc["thinkingConfig"] = {"thinkingBudget": 2048 if "pro" in m else 1024}
+        if ("2.5" in m or "3." in m) and "lite" not in m:
+            gc["thinkingConfig"] = {"thinkingBudget": 1024}
         payload = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -495,7 +490,7 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
             parts = (cands[0].get("content") or {}).get("parts") or []
             text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
             if text:
-                return text, requested or m
+                return text, m
             last = ProviderError("gemini", 502, f"{m} returned no text (finish: {cands[0].get('finishReason')})")
             continue
         last = ProviderError("gemini", res.status_code, _err_text(res))
@@ -765,7 +760,6 @@ def fix_cylinder_axes(pid: str, shape: str, size: List[float], rot: List[float])
     if sz > sy * 1.35 and abs(sx - sy) <= 0.42 * max(sx, sy):
         rad_avg = (sx + sy) / 2.0
         length = sz
-        # If local Y was near vertical (`abs(rx) < 45`), tilt local Y forward by +90 deg around X so it points along Z
         if abs(rx) < 45.0 and abs(rz) < 45.0:
             rx = _wrap_deg(rx + 90.0)
         return [rad_avg, length, rad_avg], [rx, ry, rz]
@@ -1414,7 +1408,7 @@ async def test_key(req: TestKeyRequest):
                     raise HTTPException(status_code=400, detail="Serper rejected key.")
                 return {"ok": True, "message": "Serper verified & active!"}
             if prov == "gemini":
-                m = normalize_gemini_model(model or "gemini-2.5-flash")
+                m = normalize_gemini_model(model or "gemini-3.8-flash")
                 res = await client.post(
                     f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
                     headers={"x-goog-api-key": key},
@@ -1422,7 +1416,7 @@ async def test_key(req: TestKeyRequest):
                 )
                 if res.status_code != 200:
                     raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
-                return {"ok": True, "message": f"Gemini verified ({model or m})!"}
+                return {"ok": True, "message": f"Gemini verified ({m})!"}
             if prov in ("openai", "groq"):
                 base = "[https://api.openai.com/v1](https://api.openai.com/v1)" if prov == "openai" else "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
                 m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
