@@ -1,13 +1,21 @@
 """
-Verdant 3D - Roblox-native multi-AI backend (v16)
+Verdant 3D - Roblox-native multi-AI backend (v17 - Argon Medium & Studio Boss Edition)
 
-Upgrades in v16:
-A. Enhanced AI Design Intelligence: Upgraded system prompts and blueprints to enforce true originality,
-   distinct aesthetic styling, custom component layering (armor, mechanical trims, glowing core nodes),
-   and complex multi-part silhouettes instead of generic low-poly shapes.
-B. Advanced Part-Stitching and Kinematic Articulation: Refined joint-snapping and coplanar adjustments
-   to prevent z-fighting and floating components entirely.
-C. Bulletproof error handling across Gemini 3.8/3.7/3.6, Anthropic, OpenAI, and Groq providers.
+Upgrades in v17:
+1. Native Argon Medium & Thinking Budget Support: Full alias & reasoning support for
+   gemini-4-argon, gemini-3.8-flash, and gemini-3.7-flash with medium thinkingConfig
+   so the model computes 3D anatomy, facial features, and color zones before generating.
+2. Semantic Color-Zone Enforcer (enforce_color_blocking) & Tonal Depth Engine:
+   Prevents monochrome grey/black builds! Automatically enforces high-contrast Roblox
+   color blocking across 6 semantic zones: Base (fur/hull), Secondary (tan/cream skin,
+   muzzle, chest & underbelly plates), Gold/Trim (crowns, wrist bracers, cuffs, buckles),
+   Accent (glowing eyes, cores, runes), Light (teeth, fangs, claws, sclera), and Dark
+   (pupils, inner mouth, joints, tires), plus deterministic HLS tonal variation.
+3. Studio Boss & Hero Blueprints: Detailed anatomical templates for Apes/Gorillas
+   (broad chest plates, open roaring jaw with fangs, brow ridges, shoulder fur/pauldrons,
+   wrist cuffs, knuckle hands), Dragons, Cephalopods, Mechs, Vehicles, Structures & Props.
+4. Full Kinematic Chain Stitcher, Coplanar Z-Fight Healer, Two-Stage Floating Part Snapper,
+   and strict Color/Detail Quality Gate with automatic revision.
 """
 import asyncio
 import colorsys
@@ -28,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v16)")
+app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v17)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -38,6 +46,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "gemini-3.8-flash")
+THINKING_LEVEL = os.getenv("THINKING_LEVEL", "medium").lower().strip()
 
 DEFAULT_MODELS = {
     "gemini": AI_MODEL,
@@ -58,25 +67,41 @@ try:
 except ValueError:
     MAX_REVISIONS = 1
 
-REVISE_BUDGET_S = 85.0
+REVISE_BUDGET_S = 95.0
 RETRY_STATUS = (429, 500, 502, 503, 504, 529)
 
 GEMINI_MODEL_ALIASES = {
+    "argon": "gemini-4-argon",
+    "argon-medium": "gemini-4-argon",
+    "gemini-argon": "gemini-4-argon",
+    "gemini-4-argon": "gemini-4-argon",
+    "gemini-4-argon-medium": "gemini-4-argon",
     "3.8flash": "gemini-3.8-flash",
     "3.8-flash": "gemini-3.8-flash",
     "gemini-3.8-flash": "gemini-3.8-flash",
-    "3.7flash": "gemini-3.8-flash",
-    "3.7-flash": "gemini-3.8-flash",
+    "3.7flash": "gemini-3.7-flash",
+    "3.7-flash": "gemini-3.7-flash",
     "gemini-3.7-flash": "gemini-3.7-flash",
     "3.6flash": "gemini-3.6-flash",
     "3.6-flash": "gemini-3.6-flash",
     "gemini-3.6-flash": "gemini-3.6-flash",
+    "3.5-flash": "gemini-3.5-flash",
     "gemini-3.5-flash": "gemini-3.5-flash",
     "gemini-3.5-flash-lite": "gemini-3.5-flash-lite",
+    "gemini-2.5-flash": "gemini-3.8-flash",
+    "gemini-2.5-pro": "gemini-3.8-flash",
+}
+
+THINKING_BUDGETS = {
+    "none": 0,
+    "off": 0,
+    "low": 1024,
+    "medium": 4096,
+    "high": 8192,
 }
 
 STUD = 0.28               # metres per Roblox stud
-MAX_PARTS = 155
+MAX_PARTS = 165
 MAX_EXTENT_STUDS = 70.0
 MAX_PART_STUDS = 28.0
 MIN_PART_STUDS = 0.16
@@ -96,56 +121,135 @@ SHAPE_ALIAS = {
     "ring": "torus", "donut": "torus", "hoop": "torus", "collar": "torus",
 }
 PART_RANGE = {
-    "creature": (88, 128), "humanoid": (82, 118), "vehicle": (82, 122),
-    "structure": (88, 132), "prop": (58, 95), "plant": (68, 108),
+    "creature": (96, 138), "humanoid": (90, 130), "vehicle": (88, 128),
+    "structure": (92, 138), "prop": (64, 104), "plant": (74, 116),
 }
-GATE = 0.78
+GATE = 0.80
 
-# --------------------------------------------------------------------------- the skill (Upgraded for Originality & Design Flair)
-CORE_SKILL = """You are the VERDANT MASTER SCULPTOR & CONCEPT ARTIST: a veteran Roblox game designer who constructs highly original, creative, and visually striking models out of Roblox Parts. You inject genuine personality, sharp silhouette hierarchy, armor layering, and signature design features into every creation—never returning boring, generic boxes.
+# --------------------------------------------------------------------------- the skill
+CORE_SKILL = """You are the VERDANT MASTER SCULPTOR: an elite Roblox Studio lead character & asset artist (like the builders behind top front-page Roblox simulator & boss games). You build expressive, richly colored, multi-layered models out of Roblox Parts that look like real hand-crafted Roblox game bosses, pets, vehicles, and props—NEVER bland monochrome grey robot blocks!
 
 OUTPUT - reply with ONE valid JSON object and nothing else (no markdown fences, no comments, no prose):
 {
-  "title": "Creative Model Title",
+  "title": "Iconic Game-Ready Title",
   "category": "creature|humanoid|vehicle|structure|prop|plant",
   "plan": {
-    "reference": "2-3 sentences: what the REAL subject looks like with unique design accents, color grading, and styling",
-    "must_have": ["countable features that MUST appear with specific creative styling, e.g. 'ornate golden crown', 'glowing cyan core reactor', 'segmented armored pauldrons'"],
-    "signature_features": ["6-10 creative traits that make this model instantly iconic and memorable"],
-    "palette": {"base":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb","dark":"#rrggbb","light":"#rrggbb"},
+    "reference": "2-3 sentences: exact anatomy, posture, facial expression, and distinct color-blocking zones of the subject",
+    "must_have": ["countable features with explicit colors, e.g. 'tan/cream chest & muzzle plates', 'open roaring mouth with 6 white fangs & pink tongue', 'glowing red eyes under heavy brow', 'gold wrist bracers & crown', 'layered dark fur shoulder pads'"],
+    "signature_features": ["6-10 traits that give this model front-page Roblox game appeal"],
+    "palette": {
+      "base": "#1b2432",
+      "secondary": "#e8dcc4",
+      "trim": "#f5c518",
+      "accent": "#ff2a2a",
+      "dark": "#0f1319",
+      "light": "#ffffff"
+    },
     "proportions": "one sentence with exact width:height:length ratios in studs",
-    "sections": {"Head": 18, "Body": 22}
+    "sections": {"Head_And_Face": 26, "Torso_And_Chest": 24, "Arms_And_Hands": 28, "Legs_And_Feet": 18, "Armor_And_Accessories": 14}
   },
   "ops": [
     {"id":"Group_Part","shape":"box|cylinder|sphere|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.04}
   ]
 }
 
-ROBLOX DESIGN & BUILD LAWS:
-1. COORDINATES: Units are STUDS. Y is UP, ground is y=0, model is centred on x=0, z=0, front faces +Z. Use a 0.5-stud snap grid.
-2. SHAPE & CREATIVE HIERARCHY:
-   - `box` = Roblox Block (at least 75% of parts). Use stepped construction for curves.
-   - `cylinder` = Wheels, pillars, barrels, exhaust pipes, core columns, weapon grips.
-   - `sphere`/`cone`/`torus` = Sparingly for eyes, glowing energy orbs, gems, spikes, and accent rings.
-3. ORIGINALITY & FLAIR: Do not make bland grey/brown shapes. Add contrasting armor plates, highlight trim lines offset by 0.12 studs, glowing eye slits or reactor cores (`accent` color), and mechanical joints (`dark` color).
-4. ZERO FLOATING PARTS: Every limb, tentacle, weapon, armor piece, or wing segment must physically overlap or interlock with its parent structure.
-5. COLOUR PALETTE: Use high-contrast harmonic hex codes specified in `plan.palette`.
-"""
+ROBLOX STUDIO ART DIRECTION & BUILD LAWS (FOLLOW STRICTLY):
+1. COORDINATES: Units are STUDS. Y is UP, ground is y=0, model is centred on x=0, z=0, and the FRONT faces +Z (X = left/right width, Y = vertical height, Z = front/back length). Snap sizes and positions to a 0.25 or 0.5 stud grid.
+2. COLOR BLOCKING IS KING (NO MONOCHROME BUILDS!):
+   Top Roblox models read from 100 studs away because of bold color contrast. You MUST use all 6 palette roles across the model:
+   - `base`: Primary body fur, hull, or main armor (e.g. deep navy-charcoal `#1b2432`, rich purple `#5b2c86`, crimson `#9e1b1b`—NEVER dull mid-grey everywhere). Keep `base` under 55% of parts!
+   - `secondary`: High-contrast skin, face muzzle, chest pectorals, abs, underbelly plates, inner ears, hands/toes (e.g. warm cream/tan `#e6d5b8`, light lavender, or silver-white). Every creature/character MUST have a distinct `secondary` colored chest/belly and face/muzzle zone!
+   - `trim`: Bold gold, bronze, or contrasting royal accent (`#f5c518`, `#ff9f1c`, `#00d2ff`) for wrist bracers/cuffs, crowns, shoulder trim, belt buckles, emblems, or wheel rims. Even natural beasts look 10x better in Roblox with kingly gold wrist cuffs, a crown, or glowing runes!
+   - `accent`: Vibrant emissive/glow color (`#ff2e2e`, `#00ffcc`, `#ffd84d`) for glowing eyes, energy cores, flames, gems, and taillights.
+   - `light`: Crisp white/ivory (`#ffffff`, `#f8f4e8`) for teeth, fangs, claws, toenails, eye sclera, and specular highlights.
+   - `dark`: Deep obsidian (`#0d1017`) for eye pupils, inner mouth cavity, nostrils, joints, and tires.
+3. EXPRESSIVE FACES & OPEN JAWS (NEVER A BLANK BLOCK HEAD):
+   Every creature, boss, or character head needs at least 16-24 parts:
+   - Cranium + layered cheek/side-fur blocks.
+   - A protruding `secondary`-colored Muzzle/Snout (`Head_Muzzle`) and lower `Head_Jaw` separated by a dark `Head_MouthCavity` block.
+   - 4 to 8 small white `light` tooth/fang blocks (`Tooth_UL`, `Tooth_UR`, `Fang_LL`, `Fang_LR`) + a pink/red `Head_Tongue` block (`#d95b72`).
+   - Heavy angled Brow ridges (`Head_Brow_L`, `Head_Brow_R`) above large glowing `Eye_L` / `Eye_R` blocks + `Pupil_L` / `Pupil_R` blocks.
+   - Ears, horns, crests, or a multi-point golden Crown (`Crown_Base`, `Crown_Point1..5`, `Crown_Gem`) on top of the head!
+4. LAYERED MUSCLE, FUR & ARMOR SILHOUETTE:
+   - Never use a single rectangle for a torso or limb. Build a broad V-taper chest with 4-6 stepped `secondary`-colored pectoral & abdominal plates (`Chest_Pec_L`, `Chest_Pec_R`, `Belly_Abs1..3`) proud by 0.2 studs on the front (+Z) of the dark `Torso_Core`.
+   - Add layered, jagged shoulder fur tufts or armored pauldrons (`Shoulder_Tuft_L1..4`, `Shoulder_Tuft_R1..4`) stepping outward and backward over the upper arms.
+   - Wrap forearms/wrists with thick decorative bracers or cuffs (`Wrist_Bracer_L1..2`, `Wrist_Bracer_R1..2` in `trim` gold) and build chunky hands with individual finger/knuckle blocks (`Hand_L_Palm`, `Finger_L1..4`, `Thumb_L`) and light-colored toes/claws on the feet (`Toe_L1..3`, `Toe_R1..3`).
+5. SHAPE BUDGET:
+   - At least 78% `box` (Roblox Blocks). Build curves and muscle bulk by stepping/stacking overlapping boxes of changing width/height.
+   - Use `cylinder` only for round cuffs/wheels/barrels/pillars/horns. Use `sphere` only for small eyes/gems/orbs.
+   - Keep `rot` X and Z at 0 for at least 65% of parts; use 15-degree step tilts (`15`, `-15`, `30`, `-30`) on brow ridges, shoulder tufts, jaw angles, and bent limb segments to give dynamic pose energy.
+6. CONNECTED CHAINS & ZERO Z-FIGHTING:
+   - Every limb segment must overlap its neighbor by at least 0.3 studs.
+   - Chest plates, eyes, pupils, teeth, bracers, and trim must protrude by 0.15-0.25 studs from the underlying part so they never flicker."""
 
 BLUEPRINTS = {
-    "creature_multi": """BLUEPRINT - CEPHALOPOD / MONSTER / CREATURE, @LO@-@HI@ parts, highly styled with armor plating, glowing accent nodes, and layered tentacles.""",
-    "creature_dragon": """BLUEPRINT - DRAGON / BEAST, @LO@-@HI@ parts, featuring layered dorsal plates, sharp crest horns, aggressive winged stance, and glowing core highlights.""",
-    "creature_quad": """BLUEPRINT - QUADRUPED / MECH BEAST, @LO@-@HI@ parts, structured with robust muscle/armor blocks, powerful stance, and striking silhouette.""",
-    "creature_bird": """BLUEPRINT - BIRD / PHOENIX / GRIFFIN, @LO@-@HI@ parts, fanned layered wing feathers, sharp beak, and majestic posture.""",
-    "creature_aquatic": """BLUEPRINT - AQUATIC / LEVIATHAN, @LO@-@HI@ parts, streamlined segmented body, dorsal crests, and powerful tail flukes.""",
-    "humanoid": """BLUEPRINT - CHARACTER / MECH / KNIGHT, @LO@-@HI@ parts, detailed helmet/visor, pauldrons, chest core, articulated limbs, and signature weapon/shield.""",
-    "vehicle": """BLUEPRINT - VEHICLE / SUPERCAR / SPACESHIP, @LO@-@HI@ parts, aerodynamic splitters, custom wheels with cylinders, glowing headlights/exhausts, and sleek paneling.""",
-    "structure": """BLUEPRINT - ARCHITECTURAL STRUCTURE, @LO@-@HI@ parts, stone foundations, timber pillars, glowing windows, and pitched roof gables.""",
-    "prop": """BLUEPRINT - PROP / WEAPON / ARTIFACT, @LO@-@HI@ parts, intricate hilt, glowing runes, layered plating, and display plinth.""",
-    "plant": """BLUEPRINT - BOTANICAL / STYLIZED TREE, @LO@-@HI@ parts, twisting roots, stacked trunk segments, and multi-tone layered foliage clusters.""",
+    "creature_quad": """BLUEPRINT - STUDIO BOSS APE / GORILLA / QUADRUPED / DINO / BEAST, @LO@-@HI@ parts, built like a front-page Roblox Boss:
+- IF GORILLA / APE / KING KONG / YETI / TROLL:
+  - STANCE & PROPORTIONS: Massive, imposing front-heavy knuckle-brawler stance! Width across shoulders X = 22-26 studs, height Y = 24-28 studs, depth Z = 18-22 studs.
+  - HEAD, ROARING FACE & CROWN (24-30 parts, centered at [0, 19..23, 5..8]):
+    - `Head_Cranium` dark base box [7.5, 6.5, 7.0] at [0, 20.5, 4.5] + `Head_Crest` [5.5, 2.0, 6.0] at [0, 24.0, 4.0] + cheek fur blocks `Head_Cheek_L` / `Head_Cheek_R` [2.2, 4.5, 5.0] at [-4.2, 19.5, 4.5] / [4.2, 19.5, 4.5].
+    - `Head_FacePlate` in `secondary` (cream/tan `#e8dcc4`) [6.2, 5.2, 1.5] at [0, 20.2, 8.0].
+    - Heavy fierce brows: `Head_Brow_L` / `Head_Brow_R` [3.2, 1.1, 1.8] at [-1.8, 22.0, 8.6] / [1.8, 22.0, 8.6] tilted `rot:[0,0,-15]` and `[0,0,15]`.
+    - Glowing Eyes: `Eye_L` / `Eye_R` in `accent` bright red (`#ff2a2a`) [1.8, 1.1, 0.6] at [-1.9, 21.1, 8.7] / [1.9, 21.1, 8.7] with dark pupils `Pupil_L` / `Pupil_R` [0.7, 0.9, 0.4] at z=8.95.
+    - Open Roaring Mouth: `Head_Muzzle_Upper` tan box [5.4, 1.8, 2.6] at [0, 19.3, 8.8], `Head_Nostril_L`/`R` dark blocks, `Head_Mouth_Cavity` dark box [4.4, 2.4, 2.0] at [0, 17.8, 8.4], `Head_Jaw_Lower` tan box [5.0, 1.6, 2.8] at [0, 16.4, 8.7], pink `Head_Tongue` `#e06b80` [3.0, 0.8, 2.0] at [0, 17.1, 8.6], and 6 white `light` teeth/fangs (`Fang_UL`, `Fang_UR`, `Tooth_U1..2`, `Fang_LL`, `Fang_LR`) [0.7, 1.1, 0.7] at z=9.6.
+    - GOLDEN CROWN / CREST (7-9 parts in `trim` gold `#f5c518`): `Crown_Band` [5.8, 1.4, 5.8] at [0, 24.8, 4.2] with 5 tall angled golden spikes (`Crown_Spike_F`, `Crown_Spike_FL`, `Crown_Spike_FR`, `Crown_Spike_BL`, `Crown_Spike_BR`) reaching y=27.5 and a front `Crown_Gem` diamond block.
+  - TORSO & CREAM CHEST PLATES (20-26 parts):
+    - Broad V-taper `Torso_Upper` dark base [15.0, 9.0, 10.0] at [0, 15.5, 1.5], `Torso_Mid` [12.5, 6.5, 8.5] at [0, 10.5, 0.5], `Pelvis` [11.0, 4.5, 7.5] at [0, 7.2, -0.5].
+    - Stepped `secondary` (cream/tan `#e8dcc4`) sculpted chest & abs on the front (+Z): `Chest_Pec_L` / `Chest_Pec_R` [5.8, 4.8, 1.6] at [-3.1, 16.2, 6.4] / [3.1, 16.2, 6.4], `Chest_Center` [4.0, 3.5, 1.4] at [0, 15.8, 6.5], `Belly_Ab1` [8.5, 2.8, 1.4] at [0, 12.8, 5.0], `Belly_Ab2` [6.5, 2.5, 1.4] at [0, 10.2, 4.2], `Belly_Ab3` [4.5, 2.0, 1.2] at [0, 8.2, 3.6].
+    - Layered jagged dark shoulder fur pads (`Pauldron_L_1..4` at x=-8.5..-11.5, y=17..21, z=1..3 and `Pauldron_R_1..4` at x=+8.5..+11.5) + back muscle plates (`Back_Silver1..3`).
+  - MASSIVE MUSCULAR ARMS, GOLD BRACERS & HANDS (28-34 parts):
+    - Left & Right symmetrical chains reaching down to the ground at x = -9.5 and +9.5, z = +4.5..+6.5:
+    - `Arm_L_Shoulder` [6.5, 6.5, 6.5] at [-9.2, 17.5, 2.5], `Arm_L_Bicep` [6.0, 6.5, 6.0] at [-9.8, 12.8, 3.8], `Arm_L_Forearm` [6.8, 6.5, 6.8] at [-9.8, 7.5, 5.2].
+    - GOLDEN WRIST BRACERS (`trim` `#f5c518`): `Bracer_L_Top` [7.4, 1.4, 7.4] at [-9.8, 9.2, 5.2], `Bracer_L_Main` [7.2, 2.6, 7.2] at [-9.8, 7.2, 5.2], `Bracer_L_Bot` [7.4, 1.2, 7.4] at [-9.8, 5.4, 5.2] (and matching `Bracer_R_*` on Right arm!).
+    - Huge Knuckle Hands at y=0..4.5: `Hand_L_Base` dark [6.8, 3.5, 6.5] at [-9.8, 2.8, 5.6], plus 4 cream/tan `secondary` knuckle finger blocks `Finger_L_1..4` [1.5, 2.4, 2.2] across x=[-12.0..-7.6], y=1.2, z=8.4 and `Thumb_L` at [-7.0, 1.8, 6.5] (same for `Hand_R_*` and `Finger_R_1..4`).
+  - STOUT HIND LEGS & CREAM TOES (16-20 parts):
+    - `Leg_L_Thigh` [5.5, 5.5, 5.8] at [-4.8, 5.5, -1.0], `Leg_L_Shin` [4.8, 4.5, 5.0] at [-4.8, 2.5, -0.5], `Foot_L_Base` [5.2, 2.0, 6.0] at [-4.8, 1.0, 0.8], plus 4 cream/tan `secondary` toe blocks `Toe_L_1..4` [1.2, 1.6, 2.2] at [-6.6..-3.0, 0.8, 3.6] (and matching `Leg_R_*`, `Foot_R_Base`, `Toe_R_1..4`).
+- IF QUADRUPED / WOLF / LION / BEAR / DINO: apply the same rich color-blocking: `secondary` underbelly & muzzle, open fanged jaw with tongue & glowing eyes, layered mane/dorsal plates, `trim` armor accents, and 4 articulated leg chains with individual light claws at y=0.""",
+
+    "creature_multi": """BLUEPRINT - CEPHALOPOD (SQUID / OCTOPUS / KRAKEN) OR ARACHNID / CRUSTACEAN, @LO@-@HI@ parts, built from Roblox blocks:
+- IF SQUID / OCTOPUS / KRAKEN / CUTTLEFISH:
+  - HEAD & EXPRESSIVE FACE: `Head_Core` box [12,7,10] at [0,7.5,2]. `Head_Brow_L` / `Head_Brow_R` angled boxes [4.5,1.2,1.6] at [-4,11.2,7.2] / [4,11.2,7.2]. `Head_Collar` [13,1.4,11] at [0,11.7,1.5] in `trim` or `secondary`.
+  - BIG GLOWING EYES: `Eye_L` / `Eye_R` boxes [3.4,3.4,0.9] at [-4,8.6,7.4] / [4,8.6,7.4] in bright `accent` yellow/cyan, `Pupil_L` / `Pupil_R` dark boxes [0.9,2.6,0.5] at z=8.0, plus 2 white `light` eye shine blocks.
+  - BEAK & MOUTH: `Beak_Upper` [2.4,1.6,2.2] at [0,6.4,7.6], `Beak_Lower` [1.8,1.2,1.8] at [0,5.0,7.4] surrounded by 4 white tooth blocks.
+  - FAT STEPPED MANTLE: 7 boxes `Mantle_1` .. `Mantle_7`, each 3.2 tall, stepping up and back:
+      Mantle_1 [11,3.2,10] at [0,13.0,-1.0]; Mantle_2 [12,3.2,11] at [0,15.2,-4.2]; Mantle_3 [12.5,3.2,11.5] at [0,17.4,-7.4]; Mantle_4 [12,3.2,11] at [0,19.6,-10.6]; Mantle_5 [11,3.2,10] at [0,21.8,-13.8]; Mantle_6 [9.5,3,8.5] at [0,24.0,-17.0]; Mantle_7 [7.5,2.6,6.5] at [0,26.0,-20.0].
+    Add 4 `secondary` cream/lighter belly plates on the mantle underside (`Mantle_Belly1..4`), 5 `trim`/accent bioluminescent spots or dorsal crest plates along the top (`Mantle_Crest1..5`), and 2 wide stepped lateral fins (`Fin_L_1..4`, `Fin_R_1..4`).
+  - 8 RADIAL ARMS + 2 FEEDING TENTACLES: 4 segments each (`Arm_FL_Seg1..4`, etc.) fanning out at 45-degree yaw steps, each arm carrying 2-3 contrasting `light`/`secondary` sucker blocks underneath.""",
+
+    "creature_dragon": """BLUEPRINT - DRAGON / WYVERN / WINGED BOSS, @LO@-@HI@ parts, built from Roblox blocks:
+- SILHOUETTE: wingspan 30-40 studs (X), length 28-36 studs (Z), proud boss stance.
+- HEAD, ROARING JAWS & HORNS (22-28): `Head_Cranium`, `Head_Snout`, hinged lower `Head_Jaw` with dark `Mouth_Cavity`, pink/fiery `Tongue`, 8 white `Tooth`/`Fang` blocks, angled brow blocks, glowing `Eye_L`/`R` + pupils, 2 swept 4-segment horns (`Horn_L_1..4`, `Horn_R_1..4`) in `trim`/`light`, and a 4-segment neck chain `Neck_Seg1..4` with `secondary` throat scutes and dorsal spikes.
+- TORSO (16-20): broad `Torso_Chest` in `base`, 6 overlapping `secondary` (cream/gold) belly scute plates (`Belly_Scute1..6`), haunches, and dorsal ridge spikes down the spine.
+- WINGS (2 x 15-18): shoulder armor, upper/forearm wing bones, 4 fanning wing spars in `dark`/`trim`, and contrasting `secondary`/`accent` membrane plates between spars.
+- LEGS & TAIL (26-32): 4 muscular 4-segment legs with golden leg bands (`Bracer_*`) and 3 white `Claw_*` blocks per foot at y=0, plus a 7-segment tapering tail ending in a spade/flame tip.""",
+
+    "creature_bird": """BLUEPRINT - BIRD / PHOENIX / GRIFFIN BOSS, @LO@-@HI@ parts:
+- Stepped `base` body with 5 layered `secondary` chest plumage plates, 2-part hooked golden `trim` beak (`Beak_Upper`, `Beak_Lower`), glowing `accent` eyes + brow ridges, 6-part royal head crest/crown, 2 wide 3-layer feathered wings (inner, mid, and contrasting tip feathers), fanned tail feathers, and 2 golden-taloned legs gripping a rocky pedestal.""",
+
+    "creature_aquatic": """BLUEPRINT - AQUATIC / SHARK / LEVIATHAN BOSS, @LO@-@HI@ parts:
+- 9-segment tapering body along Z (`Body_Seg1..9`) with a crisp two-tone counter-shade (`base` dorsal top, bright `secondary` cream underbelly `Belly_Seg1..7`), open jaws lined with 10 white `Tooth_*` blocks, glowing `accent` eyes, gill slits, bioluminescent `trim` lateral stripes, tall stepped dorsal fin, pectoral fins, and twin tail flukes.""",
+
+    "humanoid": """BLUEPRINT - HUMANOID / MECH / KNIGHT / BOSS CHARACTER, @LO@-@HI@ parts, 18-24 studs tall:
+- HEAD & HELMET/CROWN (18-24): `Head_Skull`, `Face_Plate` (`secondary` skin or dark visor), glowing `Eye_L`/`Eye_R` + brows/mouth, and a multi-part helmet, hood, hair, or golden crown (`Crown_*`) with plumes/horns.
+- TORSO & ARMOR (20-26): broad chest armor with contrasting `secondary` chest plates, glowing `accent` chest core/emblem, `trim` gold belt with buckle and tassets, layered multi-part shoulder pauldrons (`Pauldron_L_1..3`, `Pauldron_R_1..3`), and a cape/backpack/wings at -Z.
+- ARMS, GAUNTLETS & WEAPON (24-30): `Shoulder -> Bicep -> Forearm -> Gold Bracer/Gauntlet -> Hand + Fingers`, wielding a multi-part signature weapon (sword/warhammer/staff with hilt, guard, blade, and glowing runes).
+- LEGS & BOOTS (18-22): `Thigh -> KneeGuard (trim) -> Shin/Greave -> Boot + Sole/Toes` planted firmly at y=0.""",
+
+    "vehicle": """BLUEPRINT - VEHICLE (SUPERCAR / TRUCK / AIRCRAFT / SHIP), @LO@-@HI@ parts:
+- Multi-tone bodywork: `base` primary paint, `secondary` racing stripes/lower trim, `dark` carbon splitters/diffuser/tires, `trim` gold/silver wheel rims & badging, `light` bright headlights & window glass highlights, and `accent` glowing taillights/afterburners.
+- Wheeled vehicles include 4 multi-part cylindrical wheels (`Tire`, `Rim`, `Hub`, `Caliper`), tilted hood/windshield/fastback roof, side intakes, mirrors, quad exhausts, and rear spoiler wing.""",
+
+    "structure": """BLUEPRINT - ARCHITECTURAL STRUCTURE / CASTLE / TOWER / SHRINE, @LO@-@HI@ parts:
+- Multi-tone materials: `dark`/`secondary` stepped stone foundation and corner quoins, `base` recessed wall panels, `trim` ornate roof trims/gold finials/banners, `accent` warm glowing window panes & hanging lanterns, `light` steps and arch keystones, plus pitched roof slopes, timber beams, and courtyard props.""",
+
+    "prop": """BLUEPRINT - DETAILED PROP / WEAPON / ARTIFACT / CHEST, @LO@-@HI@ parts:
+- Crisp multi-material layering using all 6 palette slots: `dark` grip/iron frame, `trim` ornate gold crossguard/brackets/locks, `base` casing/scabbard, `secondary` blade fuller/inlay, `light` razor edges/rivets/teeth, and `accent` glowing runes/gems/treasure.""",
+
+    "plant": """BLUEPRINT - STYLIZED TREE / BOTANICAL DIORAMA / FANTASY FLORA, @LO@-@HI@ parts:
+- Stepped earth & mossy rock base (`dark` + `secondary`), twisted multi-branch root & trunk chains (`base`), and 25-35 layered canopy/blossom/mushroom blocks across 3 distinct shades (`secondary`, `trim`, `accent`, `light`) with glowing fruit/spores.""",
 }
 
-WINGS_BP = """WINGS ADD-ON: Symmetrical majestic wings with layered feather/membrane blocks spreading along X."""
+WINGS_BP = """WINGS ADD-ON: Build 2 large symmetrical wings spreading wide along -X and +X from block shoulders. Each wing has a shoulder block, a 3-block leading-edge arm in `base`/`trim`, and 2-3 rows of 6-8 flat feather/membrane blocks in `secondary`/`accent` fanned out in 15 degree steps."""
 
 KW = {
     "vehicle": r"\b(car|supercar|sportcar|sports car|hypercar|sedan|coupe|convertible|lamborghini|ferrari|porsche|bugatti|mclaren|mustang|camaro|corvette|gtr|supra|f1|formula|racecar|truck|pickup|lorry|bus|van|suv|jeep|hummer|limo|taxi|police car|ambulance|firetruck|tractor|motorcycle|motorbike|bike|bicycle|scooter|moped|atv|quad|tank|apc|humvee|train|locomotive|tram|subway|monorail|plane|airplane|biplane|airliner|fighter|jet|bomber|helicopter|chopper|drone|blimp|zeppelin|airship|rocket|spaceship|starship|spacecraft|shuttle|ufo|saucer|rover|lander|boat|ship|sailboat|yacht|speedboat|ferry|cruiser|battleship|carrier|submarine|sub|pirate ship|galleon|canoe|kayak|raft|jetski|hovercraft|sled|sleigh|chariot|wagon|cart|carriage|coach|rickshaw|kart|go-kart|buggy|forklift|bulldozer|excavator|crane|dump truck|cement mixer|combine|harvester|snowplow|snowmobile|segway|skateboard|hoverboard|rollercoaster)\b",
@@ -187,8 +291,8 @@ def classify(prompt: str, hint: str = "") -> Tuple[str, str, bool, bool]:
 def part_range(cat: str, target: Optional[int]) -> Tuple[int, int]:
     lo, hi = PART_RANGE[cat]
     if target:
-        t = max(30, min(145, int(target)))
-        lo, hi = max(30, t - 12), min(145, t + 12)
+        t = max(30, min(160, int(target)))
+        lo, hi = max(30, t - 12), min(160, t + 12)
     return lo, hi
 
 
@@ -203,10 +307,13 @@ def build_user_prompt(prompt: str, cat: str, sub: str, lo: int, hi: int, web_ctx
         f'SUBJECT: "{prompt}"',
         f"CATEGORY: {cat}" + (f" ({sub})" if sub else ""),
         f"TARGET: {lo}-{hi} parts, longest side 24-45 studs.",
-        "Design this model with absolute creative originality and high fidelity. Define a rich color palette, distinct armor/detailing layers, and precise Roblox part hierarchies.",
+        "Build this like a front-page Roblox game boss/asset! MUST INCLUDE:",
+        "1) Bold 6-color contrast (`base` body/fur, warm `secondary` cream/tan skin for face muzzle, chest pectorals, abs, fingers & toes, bright `trim` gold for crown/wrist bracers/cuffs/armor trim, glowing `accent` eyes, `light` white fangs/teeth/claws, and `dark` pupils/mouth cavity).",
+        "2) An expressive detailed head (brows, glowing eyes, pupils, protruding muzzle, open jaw with white fangs & pink tongue, plus crown/horns/ears).",
+        "3) Layered chest plates, shoulder fur tufts/pauldrons, golden wrist bracers, and individual fingers/toes.",
     ]
     if web_ctx:
-        out.append("REFERENCE RESEARCH:\n" + web_ctx)
+        out.append("LIVE WEB REFERENCE (match the subject's iconic colors, anatomy, accessories, and markings):\n" + web_ctx)
     return "\n".join(out)
 
 
@@ -219,15 +326,17 @@ def compact_build(parts: List[Dict[str, Any]]) -> str:
 def build_revision_prompt(prompt: str, cat: str, lo: int, hi: int, parts: List[Dict[str, Any]],
                           problems: List[str], change: str = "") -> str:
     out = [f'SUBJECT: "{prompt}"', f"CATEGORY: {cat}", f"TARGET: {lo}-{hi} parts.",
-           'CURRENT BUILD:', compact_build(parts)]
+           'CURRENT BUILD in studs, rows are [id, shape, size, pos, rot, color, smooth]:', compact_build(parts)]
     if change:
-        out.append(f'REQUESTED CHANGE: "{change}"')
+        out.append(f'REQUESTED CHANGE FROM THE USER: "{change}"\nApply it faithfully and keep everything else.')
     if problems:
-        out.append("ISSUES TO FIX:\n" + "\n".join("- " + m for m in problems))
-    out.append('Return the COMPLETE updated JSON schema.')
+        out.append("PROBLEMS FOUND BY THE CHECKER - fix all of them:\n" + "\n".join("- " + m for m in problems))
+    out.append("Ensure high-contrast Roblox color blocking (cream/tan chest & face plates, gold wrist bracers/crown, glowing eyes, white fangs/claws) and zero floating parts.")
+    out.append("Return the COMPLETE corrected build in the same JSON schema (plan + every op), never a diff.")
     return "\n".join(out)
 
 
+# --------------------------------------------------------------------------- providers & Argon / Gemini 3.8 support
 class ProviderError(Exception):
     def __init__(self, provider: str, status: int, message: str):
         super().__init__(message)
@@ -239,10 +348,18 @@ class ProviderError(Exception):
 
 
 def normalize_gemini_model(name: str) -> str:
-    m = (name or "gemini-3.8-flash").strip().lower()
+    m = (name or DEFAULT_MODELS["gemini"]).strip().lower()
     if m.startswith("models/"):
         m = m.split("models/", 1)[1]
-    return GEMINI_MODEL_ALIASES.get(m, m if m.startswith("gemini-") else "gemini-3.8-flash")
+    if m in GEMINI_MODEL_ALIASES:
+        return GEMINI_MODEL_ALIASES[m]
+    if "argon" in m:
+        return "gemini-4-argon"
+    if not m.startswith("gemini-"):
+        if "lite" in m:
+            return "gemini-3.5-flash-lite"
+        return "gemini-3.8-flash"
+    return m
 
 
 def _err_text(res: httpx.Response) -> str:
@@ -256,29 +373,140 @@ def _err_text(res: httpx.Response) -> str:
         return res.text[:260]
 
 
+_LIMIT_HINT = re.compile(r"too large|too high|too many|exceed|at most|less than or equal|no more than|"
+                         r"maximum (?:allowed|value|number|output|completion)|which is the maximum|is the maximum")
+
+
+def _limit_from(low: str, current: int) -> int:
+    if not _LIMIT_HINT.search(low):
+        return 0
+    nums = [int(n) for n in re.findall(r"(?<![\d.])\d{3,7}(?![\d.])", low)]
+    below = [n for n in nums if 256 <= n < current]
+    return max(below) if below else 0
+
+
+def _heal_payload(payload: Dict[str, Any], body: str) -> bool:
+    low, changed = body.lower(), False
+    for k in ("temperature", "response_format", "reasoning_effort", "top_p"):
+        if k in payload and k in low:
+            payload.pop(k)
+            changed = True
+    if "response_format" in payload and re.search(r"json_validate_failed|failed_generation|json mode|json_object", low):
+        payload.pop("response_format")
+        changed = True
+    swapped = False
+    if "max_tokens" in payload and "max_completion_tokens" in low:
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+        swapped = changed = True
+    if not swapped:
+        for k in ("max_tokens", "max_completion_tokens"):
+            if k in payload and "token" in low and _LIMIT_HINT.search(low):
+                lim = _limit_from(low, payload[k])
+                new = lim or max(1024, payload[k] // 2)
+                if new < payload[k]:
+                    payload[k] = new
+                    changed = True
+    return changed
+
+
+def _retry_delay(res: httpx.Response, attempt: int) -> float:
+    try:
+        ra = float(res.headers.get("retry-after", ""))
+    except ValueError:
+        ra = 0.0
+    return min(5.0, ra if ra > 0 else 1.1 * attempt)
+
+
+def _worth_retrying(res: httpx.Response) -> bool:
+    if res.status_code not in RETRY_STATUS:
+        return False
+    low = res.text.lower()
+    return not ("insufficient_quota" in low or "billing" in low)
+
+
 async def _post_healing(client: httpx.AsyncClient, provider: str, url: str, headers: Dict[str, str],
                         payload: Dict[str, Any]) -> Dict[str, Any]:
-    res = await client.post(url, headers=headers, json=payload)
-    if res.status_code == 200:
-        return res.json()
-    raise ProviderError(provider, res.status_code, _err_text(res))
+    heals = retries = 0
+    while True:
+        res = await client.post(url, headers=headers, json=payload)
+        if res.status_code == 200:
+            try:
+                return res.json()
+            except ValueError:
+                raise ProviderError(provider, 502, "the provider returned a non-JSON response")
+        if res.status_code == 400 and heals < 6 and _heal_payload(payload, res.text):
+            heals += 1
+            continue
+        if retries < 2 and _worth_retrying(res):
+            retries += 1
+            await asyncio.sleep(_retry_delay(res, retries))
+            continue
+        raise ProviderError(provider, res.status_code, _err_text(res))
 
 
 async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     requested = (model or DEFAULT_MODELS["gemini"]).strip()
     primary = normalize_gemini_model(requested)
-    chain = [primary, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
-    last = None
+    chain: List[str] = []
+    for m in (
+        primary,
+        "gemini-4-argon",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash",
+    ):
+        if m and m not in chain:
+            chain.append(m)
+
+    budget = THINKING_BUDGETS.get(THINKING_LEVEL, 4096)
+    if "medium" in requested.lower():
+        budget = 4096
+    elif "high" in requested.lower():
+        budget = 8192
+
+    last: Optional[ProviderError] = None
     for m in chain:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-        gc = {"responseMimeType": "application/json", "temperature": 0.35, "maxOutputTokens": 24576}
+        gc: Dict[str, Any] = {
+            "responseMimeType": "application/json",
+            "temperature": 0.36,
+            "maxOutputTokens": 32768,
+        }
+        if budget > 0 and "lite" not in m:
+            gc["thinkingConfig"] = {"thinkingBudget": budget}
         payload = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": gc,
         }
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
-        res = await client.post(url, headers=headers, json=payload)
+        res = None
+        heals = retries = 0
+        while True:
+            res = await client.post(url, headers=headers, json=payload)
+            if res.status_code == 400 and heals < 5:
+                low = res.text.lower()
+                if "thinking" in low and "thinkingConfig" in gc:
+                    gc.pop("thinkingConfig")
+                    heals += 1
+                    continue
+                if "mime" in low and "responseMimeType" in gc:
+                    gc.pop("responseMimeType")
+                    heals += 1
+                    continue
+                if "maxoutputtokens" in low or "output token" in low:
+                    new = _limit_from(low, gc["maxOutputTokens"]) or 16384
+                    if new < gc["maxOutputTokens"]:
+                        gc["maxOutputTokens"] = new
+                        heals += 1
+                        continue
+            if retries < 1 and _worth_retrying(res):
+                retries += 1
+                await asyncio.sleep(_retry_delay(res, retries))
+                continue
+            break
         if res.status_code == 200:
             data = res.json()
             cands = data.get("candidates") or [{}]
@@ -286,18 +514,30 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
             text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
             if text:
                 return text, m
+            last = ProviderError("gemini", 502, f"{m} returned no text (finish: {cands[0].get('finishReason')})")
+            continue
         last = ProviderError("gemini", res.status_code, _err_text(res))
+        if res.status_code in (401, 403) or (res.status_code == 400 and "api key" in res.text.lower()):
+            raise last
     raise last or ProviderError("gemini", 502, "Gemini request failed")
 
 
+def _is_reasoning(model: str) -> bool:
+    return model.lower().startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
+
+
 async def call_openai_compat(client, provider, base, key, model, system, user) -> Tuple[str, str]:
-    payload = {
+    payload: Dict[str, Any] = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_object"},
-        "temperature": 0.35,
-        "max_tokens": 12000,
     }
+    if provider == "openai" and _is_reasoning(model):
+        payload["max_completion_tokens"] = 32000
+        payload["reasoning_effort"] = "medium"
+    else:
+        payload["temperature"] = 0.35
+        payload["max_tokens"] = 16000 if provider == "openai" else 12000
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     data = await _post_healing(client, provider, base + "/chat/completions", headers, payload)
     msg = ((data.get("choices") or [{}])[0].get("message") or {})
@@ -305,16 +545,18 @@ async def call_openai_compat(client, provider, base, key, model, system, user) -
 
 
 async def call_openai(client, key, model, system, user):
-    return await call_openai_compat(client, "openai", "https://api.openai.com/v1", key, model or DEFAULT_MODELS["openai"], system, user)
+    return await call_openai_compat(client, "openai", "https://api.openai.com/v1", key,
+                                    model or DEFAULT_MODELS["openai"], system, user)
 
 
 async def call_groq(client, key, model, system, user):
-    return await call_openai_compat(client, "groq", "https://api.groq.com/openai/v1", key, model or DEFAULT_MODELS["groq"], system, user)
+    return await call_openai_compat(client, "groq", "https://api.groq.com/openai/v1", key,
+                                    model or DEFAULT_MODELS["groq"], system, user)
 
 
 async def call_anthropic(client, key, model, system, user) -> Tuple[str, str]:
     model = model or DEFAULT_MODELS["anthropic"]
-    payload = {"model": model, "max_tokens": 12000, "temperature": 0.35, "system": system,
+    payload = {"model": model, "max_tokens": 16000, "temperature": 0.35, "system": system,
                "messages": [{"role": "user", "content": user}]}
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
     data = await _post_healing(client, "anthropic", "https://api.anthropic.com/v1/messages", headers, payload)
@@ -330,51 +572,105 @@ async def call_pollinations(client, system: str, user: str) -> str:
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
     if res.status_code != 200:
         raise ProviderError("free-fallback", res.status_code, _err_text(res))
-    data = res.json()
+    try:
+        data = res.json()
+    except ValueError:
+        return res.text
+    if isinstance(data, dict) and ("ops" in data or "parts" in data):
+        return json.dumps(data)
     return ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "") if isinstance(data, dict) else res.text
 
 
 async def call_llm(system: str, user: str, provider: str = "", model: str = "", api_key: str = "") -> Tuple[str, Dict[str, str]]:
     prov, key, model = (provider or "").lower().strip(), (api_key or "").strip(), (model or "").strip()
-    if not prov and ("gemini" in model.lower() or "flash" in model.lower()):
+    if not prov and any(k in model.lower() for k in ("gemini", "flash", "argon")):
         prov = "gemini"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(160.0, connect=15.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(170.0, connect=15.0)) as client:
         if prov in CALLERS and (key or ENV_KEYS[prov]):
-            text, used = await CALLERS[prov](client, key or ENV_KEYS[prov], model, system, user)
-            return text, {"provider": prov, "model": used}
+            try:
+                text, used = await CALLERS[prov](client, key or ENV_KEYS[prov], model, system, user)
+                return text, {"provider": prov, "model": used}
+            except ProviderError as e:
+                if e.status != 429:
+                    raise
+        errors: List[str] = []
         for name in ("gemini", "anthropic", "openai", "groq"):
             if ENV_KEYS[name]:
                 try:
                     text, used = await CALLERS[name](client, ENV_KEYS[name], model if name == prov else "", system, user)
                     return text, {"provider": name, "model": used}
-                except Exception:
-                    continue
-        return await call_pollinations(client, system, user), {"provider": "free-fallback", "model": "pollinations"}
+                except ProviderError as e:
+                    errors.append(f"{e.provider}: {e.message}")
+        try:
+            return await call_pollinations(client, system, user), {"provider": "free-fallback", "model": "pollinations"}
+        except Exception as e:
+            errors.append(str(e))
+    raise HTTPException(status_code=502, detail=" | ".join(errors)[:400] or "All AI providers failed.")
 
 
-_RESEARCH = OrderedDict()
+# --------------------------------------------------------------------------- web research
+_RESEARCH: "OrderedDict[str, str]" = OrderedDict()
 
 
 async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
     key = (override_key or SERPER_API_KEY).strip()
     if not key:
         return ""
+    ck = query.lower().strip()
+    if ck in _RESEARCH:
+        return _RESEARCH[ck]
+
+    async def one(client: httpx.AsyncClient, q: str) -> List[str]:
+        res = await client.post("https://google.serper.dev/search",
+                                headers={"X-API-KEY": key, "Content-Type": "application/json"}, json={"q": q, "num": 5})
+        if res.status_code != 200:
+            return []
+        d, bits = res.json(), []
+        kg = d.get("knowledgeGraph") or {}
+        if kg.get("description"):
+            bits.append(str(kg["description"]))
+        for k, v in list((kg.get("attributes") or {}).items())[:5]:
+            bits.append(f"{k}: {v}")
+        ab = d.get("answerBox") or {}
+        if ab.get("snippet") or ab.get("answer"):
+            bits.append(str(ab.get("snippet") or ab.get("answer")))
+        bits += [o["snippet"] for o in (d.get("organic") or [])[:4] if o.get("snippet")]
+        return bits
+
+    qs = [f"{query} appearance colors chest face markings", f"{query} roblox boss model design", f"{query} character anatomy"]
     try:
         async with httpx.AsyncClient(timeout=8.5) as client:
-            res = await client.post("https://google.serper.dev/search",
-                                    headers={"X-API-KEY": key, "Content-Type": "application/json"}, json={"q": query, "num": 3})
-            if res.status_code == 200:
-                d = res.json()
-                return " | ".join([o.get("snippet", "") for o in d.get("organic", []) if o.get("snippet")])[:1400]
+            results = await asyncio.gather(*(one(client, q) for q in qs), return_exceptions=True)
     except Exception:
-        pass
-    return ""
+        return ""
+    seen, bits = set(), []
+    for r in results:
+        if isinstance(r, list):
+            for b in r:
+                if b not in seen:
+                    seen.add(b)
+                    bits.append(b)
+    text = " | ".join(bits)[:1400]
+    if text:
+        _RESEARCH[ck] = text
+        while len(_RESEARCH) > 128:
+            _RESEARCH.popitem(last=False)
+    return text
 
 
 def clean_web_context(raw: str) -> str:
-    return (raw or "").strip()[:1600]
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"Live Serper Web Research Context[^:\n]*:\s*(.+)$", raw, re.S | re.I)
+    if m:
+        return m.group(1).strip()[:1600]
+    if raw.lower().startswith("request:"):
+        return ""
+    return raw[:1600]
 
 
+# --------------------------------------------------------------------------- parsing & geometry healing
 def salvage_ops(text: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {"ops": []}
     m = re.search(r'"title"\s*:\s*"([^"]*)"', text)
@@ -393,25 +689,31 @@ def salvage_ops(text: str) -> Dict[str, Any]:
             break
         try:
             obj, k = dec.raw_decode(text, j)
-            if isinstance(obj, dict):
-                out["ops"].append(obj)
-            i = k
         except ValueError:
             break
+        if isinstance(obj, dict):
+            out["ops"].append(obj)
+        i = k
     return out
 
 
 def parse_llm_json(text: str) -> Dict[str, Any]:
     t = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S | re.I)
     t = re.sub(r"```(?:json)?", "", t, flags=re.I).strip()
-    try:
-        obj = json.loads(t)
+    dec = json.JSONDecoder()
+    for fix in (False, True):
+        s = re.sub(r",\s*([}\]])", r"\1", t) if fix else t
+        starts = [x for x in (s.find("{"), s.find("[")) if x >= 0]
+        if not starts:
+            break
+        try:
+            obj, _ = dec.raw_decode(s[min(starts):])
+        except ValueError:
+            continue
         if isinstance(obj, list):
-            return {"ops": obj}
+            obj = {"ops": obj}
         if isinstance(obj, dict):
             return obj
-    except json.JSONDecodeError:
-        pass
     return salvage_ops(t)
 
 
@@ -458,51 +760,287 @@ def fix_cylinder_axes(pid: str, shape: str, size: List[float], rot: List[float])
         return size, rot
     sx, sy, sz = size
     rx, ry, rz = rot
+    is_wheel = bool(re.search(r"wheel|tire|tyre|rim|hub|axle|brake|caliper|coin|disc|disk|suck|pad|button", pid, re.I))
+
+    if is_wheel and shape == "cylinder":
+        dims = sorted([sx, sy, sz])
+        thickness, diameter = dims[0], dims[2]
+        if sx < sy * 0.8 and sx < sz * 0.8 and abs(rz) < 15:
+            rz = 90.0
+        elif sz < sx * 0.8 and sz < sy * 0.8 and abs(rx) < 15 and abs(rz) < 15:
+            rx = 90.0
+        elif abs(rx) < 15 and abs(rz) < 15 and re.search(r"wheel|tire|tyre|rim|hub|axle", pid, re.I):
+            rz = 90.0
+        return [diameter, thickness, diameter], [_wrap_deg(rx), _wrap_deg(ry), _wrap_deg(rz)]
+
     if sz > sy * 1.35 and abs(sx - sy) <= 0.42 * max(sx, sy):
-        return [(sx + sy) / 2.0, sz, (sx + sy) / 2.0], [_wrap_deg(rx + 90.0), ry, rz]
+        rad_avg = (sx + sy) / 2.0
+        length = sz
+        if abs(rx) < 45.0 and abs(rz) < 45.0:
+            rx = _wrap_deg(rx + 90.0)
+        return [rad_avg, length, rad_avg], [rx, ry, rz]
+
+    if sx > sy * 1.35 and abs(sz - sy) <= 0.42 * max(sz, sy):
+        rad_avg = (sy + sz) / 2.0
+        length = sx
+        if abs(rz) < 45.0 and abs(rx) < 45.0:
+            rz = _wrap_deg(rz - 90.0)
+        return [rad_avg, length, rad_avg], [rx, ry, rz]
+
+    if max(sx, sz) > min(sx, sz) * 1.35:
+        rad_avg = (sx + sz) / 2.0
+        return [rad_avg, sy, rad_avg], [rx, ry, rz]
+
     return size, rot
 
 
+_ROUND_EXEMPT = re.compile(r"eye|pupil|iris|orb|ball|pearl|gem|jewel|bead|knob|bubble|halo|lens|egg|berry|fruit|planet|globe", re.I)
+_SPIKE_OK = re.compile(r"spike|thorn|fang|tooth|talon|claw|horn|tusk|stinger|crown_point|crown_spike", re.I)
+_RING_OK = re.compile(r"ring|halo|hoop|tire|tyre|bracer|cuff|collar|crown_band", re.I)
+_CYL_EXEMPT = re.compile(r"wheel|tire|tyre|rim|hub|axle|barrel|pipe|exhaust|column|pillar|trunk|wand|staff|handle|pole|post|"
+                         r"nozzle|thruster|cannon|muzzle|suck|candle|lamp|chimney|spar|grip|hilt|bracer|cuff", re.I)
+
+
 def heal_part_shape_and_smoothness(pid: str, shape: str, size: List[float], smooth: float, cat: str, sub: str) -> Tuple[str, float]:
-    if shape in ("sphere", "cone", "torus") and not re.search(r"eye|pupil|spike|horn|ring", pid, re.I):
-        shape = "box"
+    longest = max(size)
+    if shape == "sphere":
+        if not (_ROUND_EXEMPT.search(pid) and longest <= 3.6):
+            shape = "box"
+    elif shape == "cone":
+        if not (_SPIKE_OK.search(pid) and longest <= 3.2):
+            shape = "box"
+    elif shape == "torus":
+        if not _RING_OK.search(pid):
+            shape = "box"
+    if shape == "box":
+        smooth = min(smooth, 0.08)
+    elif shape == "cylinder":
+        smooth = min(smooth, 0.25)
     return shape, max(0.0, min(1.0, smooth))
 
 
-def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#8fe3a9",
+def enforce_roblox_budget(parts: List[Dict[str, Any]], cat: str) -> int:
+    n = len(parts)
+    if n < 8:
+        return 0
+    changed = 0
+    round_idx = sorted((i for i, p in enumerate(parts) if p["shape"] in ("sphere", "cone", "torus")),
+                       key=lambda i: (bool(_ROUND_EXEMPT.search(parts[i]["id"])), -vol(parts[i])))
+    cap_round = max(4, int(0.10 * n))
+    for i in round_idx[: max(0, len(round_idx) - cap_round)]:
+        parts[i]["shape"] = "box"
+        parts[i]["smooth"] = min(parts[i]["smooth"], 0.08)
+        changed += 1
+    if cat in ("creature", "humanoid", "plant"):
+        cyl = sorted((i for i, p in enumerate(parts) if p["shape"] == "cylinder" and not _CYL_EXEMPT.search(p["id"])),
+                     key=lambda i: -vol(parts[i]))
+        cap_cyl = max(2, int(0.15 * n))
+        for i in cyl[cap_cyl:]:
+            parts[i]["shape"] = "box"
+            parts[i]["smooth"] = min(parts[i]["smooth"], 0.08)
+            changed += 1
+    return changed
+
+
+def _dist90(a: float) -> float:
+    return abs(((a + 45.0) % 90.0) - 45.0)
+
+
+def lean_deg(p: Dict[str, Any]) -> float:
+    return max(_dist90(p["rot"][0]), _dist90(p["rot"][2]))
+
+
+_LEAN_OK = re.compile(r"tail|wing|spar|feather|roof|hood|windshield|glass|slope|ramp|horn|tusk|branch|blade|antler|thorn|spike|stair|gable|ridge|brow|pauldron|tuft|crown", re.I)
+_LIMB_RE = re.compile(r"arm|tentacle|leg|neck|finger|toe|claw|seg|bicep|forearm|thigh|shin|jaw", re.I)
+
+
+def limit_lean(parts: List[Dict[str, Any]], max_share: float = 0.35) -> int:
+    n = len(parts)
+    if n < 20:
+        return 0
+    fixed = 0
+
+    def flatten(p: Dict[str, Any]) -> None:
+        p["rot"][0] = float(round(p["rot"][0] / 90.0) * 90)
+        p["rot"][2] = float(round(p["rot"][2] / 90.0) * 90)
+
+    for p in parts:
+        if p["shape"] == "box" and lean_deg(p) > 2 and not _LEAN_OK.search(p["id"]) and not _LIMB_RE.search(p["id"]):
+            flatten(p)
+            fixed += 1
+    leaning = sorted((p for p in parts if p["shape"] == "box" and lean_deg(p) > 2 and not _LEAN_OK.search(p["id"])),
+                     key=lean_deg)
+    over = sum(1 for p in parts if lean_deg(p) > 2) - int(max_share * n)
+    for p in leaning:
+        if over <= 0:
+            break
+        flatten(p)
+        fixed += 1
+        over -= 1
+    return fixed
+
+
+# --------------------------------------------------------------------------- Semantic Color-Zone Enforcer (NEW in v17)
+def _hex_to_hls(c: str) -> Tuple[float, float, float]:
+    r, g, b = (int(c[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
+    return colorsys.rgb_to_hls(r, g, b)
+
+
+def _hls_to_hex(h: float, l: float, s: float) -> str:
+    r, g, b = colorsys.hls_to_rgb(h % 1.0, max(0.0, min(1.0, l)), max(0.0, min(1.0, s)))
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+def _color_dist(c1: str, c2: str) -> float:
+    r1, g1, b1 = (int(c1[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
+    r2, g2, b2 = (int(c2[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
+    return math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2)
+
+
+_ZONE_SKIN_CHEST = re.compile(
+    r"chest|pec|ab|abs|belly|underbelly|stomach|scute|face|muzzle|snout|jaw|chin|cheek_inner|ear_inner|"
+    r"palm|finger|thumb|toe|sole|suck|throat", re.I
+)
+_ZONE_GOLD_TRIM = re.compile(
+    r"crown|bracer|cuff|bangle|band|buckle|trim|emblem|crest_gold|collar|pauldron_trim|rim|hilt|guard|pommel|halo|tiara|bell", re.I
+)
+_ZONE_GLOW_ACCENT = re.compile(
+    r"^eye|eye_l|eye_r|iris|visor|core|reactor|gem|jewel|rune|flame|fire|laser|plasma|glow|taillight|thruster|afterburner", re.I
+)
+_ZONE_WHITE_LIGHT = re.compile(
+    r"tooth|teeth|fang|tusk|claw|talon|nail|sclera|highlight|shine|glint|bone|skull_face|horn_tip|headlight|blade_edge", re.I
+)
+_ZONE_DARK = re.compile(
+    r"pupil|mouth|cavity|nostril|joint|tire|tyre|exhaust_inner|shadow|slit|grille", re.I
+)
+_ZONE_TONGUE = re.compile(r"tongue|gum|mouth_inner", re.I)
+
+
+def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any], prompt: str, cat: str) -> None:
+    """Guarantees rich Roblox Studio color contrast so models never look like monochrome grey blobs.
+    Maps semantic body parts (chest, muzzle, fingers, toes, crown, bracers, teeth, eyes) to distinct contrasting colors."""
+    p_low = prompt.lower()
+    base = str(palette.get("base") or "#1c2430").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", base):
+        base = "#1c2430"
+
+    # Richer base if LLM picked dull medium grey on a creature
+    bh, bl, bs = _hex_to_hls(base)
+    if cat == "creature" and bs < 0.12 and 0.18 < bl < 0.45:
+        base = _hls_to_hex(0.60, 0.16, 0.28)  # Rich dark navy-charcoal like Roblox Gorilla Boss
+        bh, bl, bs = _hex_to_hls(base)
+
+    sec = str(palette.get("secondary") or "").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", sec) or _color_dist(base, sec) < 0.28:
+        # Warm cream/tan contrast if base is dark, or deep contrast if base is light
+        if any(w in p_low for w in ("gorilla", "ape", "monkey", "kong", "bear", "wolf", "lion", "dog", "cat", "rex", "dino", "dragon")):
+            sec = "#e8dcc4" if bl < 0.55 else "#2c221e"
+        else:
+            sec = _hls_to_hex((bh + 0.08) % 1.0, min(0.86, bl + 0.48) if bl < 0.5 else max(0.18, bl - 0.42), max(0.35, bs))
+
+    trim = str(palette.get("trim") or "").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", trim) or _color_dist(base, trim) < 0.25:
+        trim = "#f5c518"  # Royal Roblox Gold for crowns, bracers, cuffs, trim
+
+    accent = str(palette.get("accent") or "").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", accent) or _color_dist(base, accent) < 0.25:
+        accent = "#ff2a2a" if any(w in p_low for w in ("gorilla", "ape", "kong", "boss", "demon", "dragon", "mech")) else "#ffd84d"
+
+    light = str(palette.get("light") or "#ffffff").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", light) or _hex_to_hls(light)[1] < 0.80:
+        light = "#f8f6f0"
+
+    dark = str(palette.get("dark") or "#0e1116").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", dark) or _hex_to_hls(dark)[1] > 0.20:
+        dark = "#0e1116"
+
+    # Update palette in-place so UI displays the upgraded swatches
+    palette["base"] = base
+    palette["secondary"] = sec
+    palette["trim"] = trim
+    palette["accent"] = accent
+    palette["light"] = light
+    palette["dark"] = dark
+
+    for p in parts:
+        pid = p["id"]
+        c = p["color"]
+        # Only override if part matches a specific anatomical/detail zone AND its current color is too close to base/dark
+        if _ZONE_TONGUE.search(pid):
+            p["color"] = "#d95b72"
+        elif _ZONE_WHITE_LIGHT.search(pid):
+            p["color"] = light
+        elif _ZONE_DARK.search(pid) and not _ZONE_GLOW_ACCENT.search(pid):
+            p["color"] = dark
+        elif _ZONE_GLOW_ACCENT.search(pid) and not re.search(r"brow|socket|lid|frame", pid, re.I):
+            p["color"] = accent
+        elif _ZONE_GOLD_TRIM.search(pid):
+            if _color_dist(c, base) < 0.25 or _hex_to_hls(c)[2] < 0.35:
+                p["color"] = trim
+        elif _ZONE_SKIN_CHEST.search(pid) and not re.search(r"back|spine|shoulder|pauldron|bicep|thigh|shin|cranium", pid, re.I):
+            if _color_dist(c, base) < 0.28:
+                p["color"] = sec
+        elif re.search(r"pauldron|tuft|mane|saddle|back_silver", pid, re.I):
+            if _color_dist(c, base) < 0.08:
+                # Slightly lighter/cooler slate for layered shoulder fur pads so they stand out against the torso
+                p["color"] = _hls_to_hex(bh, min(0.42, bl + 0.09), max(0.18, bs * 0.85))
+
+
+def _snap_q(v: float, q: float = 0.25) -> float:
+    return round(v / q) * q
+
+
+def _snap_rot(a: float) -> float:
+    return _wrap_deg(round(a / 15.0) * 15.0)
+
+
+def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#1c2430",
                   cat: str = "creature", sub: str = "") -> List[Dict[str, Any]]:
-    parts, seen = [], set()
+    parts: List[Dict[str, Any]] = []
+    seen = set()
     for idx, item in enumerate(raw_ops):
         if len(parts) >= MAX_PARTS:
             break
         if isinstance(item, (list, tuple)):
             item = _row_to_op(item)
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or str(item.get("op", "add")).lower() not in ("add", "", "part"):
             continue
-        shape = str(item.get("shape") or item.get("type") or "box").lower().strip()
+        shape = str(item.get("shape") or item.get("s") or item.get("type") or "box").lower().strip()
         shape = SHAPE_ALIAS.get(shape, shape)
         if shape not in SHAPES:
             shape = "box"
-        pid = re.sub(r"[^A-Za-z0-9_]", "", str(item.get("id") or f"Part_{idx + 1}").replace(" ", "_"))[:36] or f"Part_{idx + 1}"
+        pid = re.sub(r"[^A-Za-z0-9_]", "", str(item.get("id") or item.get("name") or item.get("n") or f"Part_{idx + 1}").replace(" ", "_"))[:36] or f"Part_{idx + 1}"
         base, n = pid, 2
         while pid in seen:
             pid, n = f"{base}_{n}", n + 1
         seen.add(pid)
 
-        size = [min(MAX_PART_STUDS, max(MIN_PART_STUDS, abs(s) * unit)) for s in _vec3(item.get("size"), (1, 1, 1))]
-        pos = [max(-90.0, min(90.0, v * unit)) for v in _vec3(item.get("pos"), (0, 0, 0))]
-        rot = [_wrap_deg(r) for r in _vec3(item.get("rot"), (0, 0, 0))]
+        size = [min(MAX_PART_STUDS, max(MIN_PART_STUDS, abs(s) * unit))
+                for s in _vec3(item.get("size") or item.get("sz") or item.get("scale"), (1, 1, 1))]
+        rp = item.get("pos") or item.get("position") or item.get("po")
+        if isinstance(rp, (list, tuple)):
+            pos = [max(-90.0, min(90.0, v * unit)) for v in _vec3(rp, (0, 0, 0))]
+        else:
+            pos = [0.0, size[1] / 2, 0.0]
+        rot = [_snap_rot(r) for r in _vec3(item.get("rot") or item.get("rotation") or item.get("ro"), (0, 0, 0))]
+
         smooth = max(0.0, min(1.0, _num(item.get("smooth"), SMOOTH_DEFAULT[shape])))
         shape, smooth = heal_part_shape_and_smoothness(pid, shape, size, smooth, cat, sub)
         size, rot = fix_cylinder_axes(pid, shape, size, rot)
+        if shape == "box" and all(abs(((r + 45.0) % 90.0) - 45.0) < 0.6 for r in rot):
+            size = [max(0.25, _snap_q(s)) for s in size]
+            pos = [_snap_q(v) for v in pos]
 
-        color = str(item.get("color") or default_color).strip()
+        color = str(item.get("color") or item.get("c") or default_color).strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{3}", color):
+            color = "#" + "".join(ch * 2 for ch in color[1:])
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
             color = default_color
         parts.append({"id": pid, "shape": shape, "size": size, "pos": pos, "rot": rot, "color": color.lower(), "smooth": smooth})
     return parts
 
 
+# --------------------------------------------------------------------------- geometry math & kinematic chain stitcher
 def _mat_mul(a, b):
     return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
 
@@ -516,14 +1054,16 @@ def rot_matrix(rot: List[float]):
 
 def aabb(p: Dict[str, Any]) -> List[Tuple[float, float]]:
     w, h, z = p["size"]
+    half_local = (0.47 * w, 0.47 * h, 0.15 * z) if p["shape"] == "torus" else (w / 2, h / 2, z / 2)
     r = rot_matrix(p["rot"])
-    half = [sum(abs(r[i][j]) * (w / 2 if j == 0 else h / 2 if j == 1 else z / 2) for j in range(3)) for i in range(3)]
+    half = [sum(abs(r[i][j]) * half_local[j] for j in range(3)) for i in range(3)]
     return [(p["pos"][i] - half[i], p["pos"][i] + half[i]) for i in range(3)]
 
 
 def aabb_gap(b1: List[Tuple[float, float]], b2: List[Tuple[float, float]]) -> Tuple[float, List[float]]:
     gaps = [max(b1[k][0] - b2[k][1], b2[k][0] - b1[k][1], 0.0) for k in range(3)]
-    mv = [(b1[k][0] - b2[k][1]) if b1[k][0] > b2[k][1] else (b1[k][1] - b2[k][0]) if b2[k][0] > b1[k][1] else 0.0 for k in range(3)]
+    mv = [(b1[k][0] - b2[k][1]) if b1[k][0] > b2[k][1]
+          else (b1[k][1] - b2[k][0]) if b2[k][0] > b1[k][1] else 0.0 for k in range(3)]
     return math.sqrt(sum(g * g for g in gaps)), mv
 
 
@@ -531,9 +1071,15 @@ def vol(p: Dict[str, Any]) -> float:
     return p["size"][0] * p["size"][1] * p["size"][2]
 
 
+def axis_aligned(p: Dict[str, Any]) -> bool:
+    return all(abs(((r + 45.0) % 90.0) - 45.0) < 0.6 for r in p["rot"])
+
+
 def bounds(parts: List[Dict[str, Any]]):
     bx = [aabb(p) for p in parts]
-    return [min(b[k][0] for b in bx) for k in range(3)], [max(b[k][1] for b in bx) for k in range(3)]
+    lo = [min(b[k][0] for b in bx) for k in range(3)]
+    hi = [max(b[k][1] for b in bx) for k in range(3)]
+    return lo, hi
 
 
 def frame(parts: List[Dict[str, Any]]) -> float:
@@ -558,8 +1104,125 @@ def dedupe(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+_CHAIN_RE = re.compile(
+    r"^((?:tentacle|arm|leg|tail|neck|spine|wing|branch|root|horn|antenna|claw|finger|toe|vine|feeler|whisker|fin)"
+    r"(?:_[a-zA-Z0-9]+?)?)"
+    r"(?:_?(?:seg|part|sec|bone|joint|node|ring|lobe)?_?(\d+)|_(base|root|shoulder|bicep|upper|mid|middle|lower|forearm|thigh|shin|calf|ankle|club|tip|end|paw|hand|foot|claw))$",
+    re.I,
+)
+_STAGE_ORDER = {
+    "base": 1, "root": 1, "shoulder": 1, "thigh": 1,
+    "upper": 2, "bicep": 2, "mid": 3, "middle": 3,
+    "lower": 4, "forearm": 4, "shin": 4, "calf": 4, "ankle": 5,
+    "club": 8, "paw": 8, "hand": 8, "foot": 8, "claw": 9, "tip": 10, "end": 10,
+}
+_DETAIL_CHILD_RE = re.compile(r"suck|pad|claw|nail|talon|spike|barb|tuft|spot|glow|ring|stripe|bracer|cuff", re.I)
+
+
 def stitch_articulated_chains(parts: List[Dict[str, Any]]) -> int:
-    return 0
+    chains: Dict[str, List[Tuple[int, int]]] = {}
+    for idx, p in enumerate(parts):
+        pid = p["id"]
+        if _DETAIL_CHILD_RE.search(pid) and not re.search(r"club$", pid, re.I):
+            continue
+        m = _CHAIN_RE.match(pid)
+        if not m:
+            continue
+        prefix = m.group(1).lower()
+        order = int(m.group(2)) if m.group(2) else _STAGE_ORDER.get((m.group(3) or "").lower(), 5)
+        chains.setdefault(prefix, []).append((order, idx))
+
+    stitched = 0
+    for prefix, seq in chains.items():
+        if len(seq) < 2:
+            continue
+        seq.sort(key=lambda x: x[0])
+        indices = [idx for _, idx in seq]
+        chain_set = set(indices)
+        child_indices = [
+            i for i, p in enumerate(parts)
+            if i not in chain_set and p["id"].lower().startswith(prefix)
+        ]
+
+        for pos_idx in range(len(indices) - 1):
+            i_prev = indices[pos_idx]
+            i_curr = indices[pos_idx + 1]
+            p_prev, p_curr = parts[i_prev], parts[i_curr]
+            b_prev, b_curr = aabb(p_prev), aabb(p_curr)
+            gap, mv = aabb_gap(b_prev, b_curr)
+
+            dx = [p_curr["pos"][k] - p_prev["pos"][k] for k in range(3)]
+            dist = math.sqrt(sum(d * d for d in dx))
+            r_prev = max(p_prev["size"]) * 0.5
+            r_curr = max(p_curr["size"]) * 0.5
+            max_reach = (r_prev + r_curr) * 0.88
+
+            if gap > 0.02 or dist > max_reach * 1.15:
+                long_axis = max(range(3), key=lambda k: p_curr["size"][k])
+                if p_curr["shape"] in ("cylinder", "cone"):
+                    long_axis = 1
+                p_curr["size"][long_axis] = min(MAX_PART_STUDS, p_curr["size"][long_axis] * 1.18)
+                b_curr = aabb(p_curr)
+                gap, mv = aabb_gap(b_prev, b_curr)
+
+            if gap > 0.01 and dist > 1e-4:
+                shift = [v + (0.12 if v > 0 else -0.12 if v < 0 else 0.0) for v in mv]
+                downstream = indices[pos_idx + 1:]
+                curr_pos_before = list(p_curr["pos"])
+                for d_idx in downstream:
+                    for k in range(3):
+                        parts[d_idx]["pos"][k] += shift[k]
+                for c_idx in child_indices:
+                    c_pos = parts[c_idx]["pos"]
+                    d_to_curr = math.sqrt(sum((c_pos[k] - curr_pos_before[k]) ** 2 for k in range(3)))
+                    d_to_prev = math.sqrt(sum((c_pos[k] - p_prev["pos"][k]) ** 2 for k in range(3)))
+                    if d_to_curr <= d_to_prev * 1.25:
+                        for k in range(3):
+                            parts[c_idx]["pos"][k] += shift[k]
+                stitched += 1
+    return stitched
+
+
+# --------------------------------------------------------------------------- checks and auto-fixes
+def find_coplanar(parts: List[Dict[str, Any]]) -> List[Tuple[int, int, int, int]]:
+    boxes = [(i, aabb(p)) for i, p in enumerate(parts) if p["shape"] == "box" and axis_aligned(p)]
+    hits = []
+    for a in range(len(boxes)):
+        i, bi = boxes[a]
+        for b in range(a + 1, len(boxes)):
+            j, bj = boxes[b]
+            if min(min(bi[k][1], bj[k][1]) - max(bi[k][0], bj[k][0]) for k in range(3)) <= 0.05:
+                continue
+            for k in range(3):
+                if abs(bi[k][1] - bj[k][1]) < 0.025:
+                    hits.append((i, j, k, 1))
+                if abs(bi[k][0] - bj[k][0]) < 0.025:
+                    hits.append((i, j, k, 0))
+    return hits
+
+
+def fix_coplanar(parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    pairs, names = set(), []
+    for pass_idx in range(8):
+        hits = find_coplanar(parts)
+        if not hits:
+            break
+        done = set()
+        step_push = PUSH * (1.0 + 0.18 * pass_idx)
+        for i, j, k, side in hits:
+            if (i, j) not in pairs:
+                pairs.add((i, j))
+                names.append(f"{parts[i]['id']}/{parts[j]['id']}")
+            tgt = i if vol(parts[i]) < vol(parts[j]) else j
+            if (tgt, k, side) in done:
+                continue
+            done.add((tgt, k, side))
+            parts[tgt]["size"][k] += step_push
+            parts[tgt]["pos"][k] += step_push / 2 if side == 1 else -step_push / 2
+    return {"pairs": len(pairs), "names": names, "remaining": len({(i, j) for i, j, _, _ in find_coplanar(parts)})}
+
+
+_FLOAT_OK = re.compile(r"^(float|halo|orbit|spark|particle|aura|hover|ember|bubble|smoke|cloud)", re.I)
 
 
 def components(parts: List[Dict[str, Any]], tol: float = 0.18) -> List[List[int]]:
@@ -576,41 +1239,117 @@ def components(parts: List[Dict[str, Any]], tol: float = 0.18) -> List[List[int]
         for j in range(i + 1, n):
             if all(bx[i][k][0] - tol <= bx[j][k][1] and bx[j][k][0] - tol <= bx[i][k][1] for k in range(3)):
                 parent[find(i)] = find(j)
-    groups = {}
+    groups: Dict[int, List[int]] = {}
     for i in range(n):
         groups.setdefault(find(i), []).append(i)
     return sorted(groups.values(), key=lambda c: (len(c), sum(vol(parts[i]) for i in c)), reverse=True)
 
 
 def snap_floating(parts: List[Dict[str, Any]], max_gap: float = 16.0) -> int:
-    comps = components(parts)
-    if len(comps) <= 1:
-        return 0
-    main = comps[0]
     snapped = 0
-    for comp in comps[1:]:
-        for i in comp:
-            for k in range(3):
-                parts[i]["pos"][k] *= 0.9
-        snapped += len(comp)
+    for _ in range(7):
+        comps = components(parts)
+        if len(comps) <= 1:
+            break
+        bx = [aabb(p) for p in parts]
+        main, moved = comps[0], False
+        main_set = set(main)
+        for comp in comps[1:]:
+            if all(_FLOAT_OK.match(parts[i]["id"]) for i in comp):
+                continue
+            comp_prefix = "_".join(parts[comp[0]]["id"].split("_")[:2]).lower()
+            candidates = [m for m in main if parts[m]["id"].lower().startswith(comp_prefix)] or main
+            best = None
+            for i in comp:
+                for m in candidates:
+                    d, mv = aabb_gap(bx[m], bx[i])
+                    if best is None or d < best[0]:
+                        best = (d, mv)
+            if best is None or best[0] > 6.0:
+                for i in comp:
+                    for m in main_set:
+                        d, mv = aabb_gap(bx[m], bx[i])
+                        if best is None or d < best[0]:
+                            best = (d, mv)
+            limit = max_gap if len(comp) <= 6 else 9.0
+            if best and best[0] <= limit:
+                mv = [v + (0.12 if v > 0 else -0.12 if v < 0 else 0.0) for v in best[1]]
+                for i in comp:
+                    for k in range(3):
+                        parts[i]["pos"][k] += mv[k]
+                snapped += len(comp)
+                moved = True
+        if not moved:
+            break
     return snapped
 
 
 def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, prompt: str,
             overlap: Dict[str, Any], snapped: int) -> Dict[str, Any]:
-    n, score = len(parts), 95.0
-    lo_b, hi_b = bounds(parts)
-    ext = [hi_b[k] - lo_b[k] for k in range(3)]
-    grade = "A" if score >= 90 else "B"
+    n, issues, score = len(parts), [], 100.0
+    glo, ghi = bounds(parts)
+    ext = [ghi[k] - glo[k] for k in range(3)]
+    gate = int(lo * GATE)
+
+    def add(code: str, msg: str, blocking: bool, penalty: float) -> None:
+        nonlocal score
+        issues.append({"code": code, "msg": msg, "blocking": blocking})
+        score -= penalty
+
+    if n < lo:
+        add("PART_COUNT_LOW", f"only {n} parts; the target is {lo}-{hi}. Add sculpted chest plates, facial details (brows, teeth, tongue), wrist bracers, crown/horns, and individual fingers/toes.",
+            n < gate, min(35.0, (lo - n) / lo * 60))
+
+    comps = components(parts)
+    stray = [c for c in comps[1:] if not all(_FLOAT_OK.match(parts[i]["id"]) for i in c)]
+    if stray:
+        names = ", ".join(parts[c[0]]["id"] for c in stray[:4])
+        add("FLOATING", f"{len(stray)} group(s) of parts are not connected to the main body (e.g. {names}). Move them so they overlap a neighbour.",
+            True, min(25.0, 10.0 * len(stray)))
+    float_msg = (f"{len(stray)} disconnected group(s) left." if stray else
+                 (f"{snapped} loose part(s) were seamlessly stitched onto the body." if snapped else "Every part is connected to the body."))
+
+    if overlap["remaining"]:
+        add("OVERLAP", f"{overlap['remaining']} pair(s) of parts still share the exact same surface.", False, min(10.0, 2.5 * overlap["remaining"]))
+    if overlap["pairs"]:
+        shown = "; ".join(overlap["names"][:2])
+        overlap_msg = (f"{overlap['pairs']} pair(s) of parts shared a surface ({shown}) — automatically offset by {PUSH / 2:.2f} stud so nothing flickers in Studio.")
+    else:
+        overlap_msg = "No same-surface overlaps - nothing will flicker in Studio."
+
+    prop_msg = "Proportions and silhouette look balanced for this subject."
+    if cat in ("creature", "humanoid"):
+        eyes = [p for p in parts if re.search(r"eye", p["id"], re.I)]
+        if not eyes:
+            add("MISSING_EYES", "the model has no visible Eye parts! Add glowing Eye_L, Eye_R, Pupil_L, Pupil_R and Brow blocks on the front of the head (+Z).", True, 15)
+
+    # Check color diversity and prevent monochrome grey/black dominance
+    color_counts: Dict[str, int] = {}
+    for p in parts:
+        bucket = "#%x%x%x" % (int(p["color"][1:3], 16) >> 5, int(p["color"][3:5], 16) >> 5, int(p["color"][5:7], 16) >> 5)
+        color_counts[bucket] = color_counts.get(bucket, 0) + 1
+    distinct_cols = len(color_counts)
+    max_col_share = max(color_counts.values()) / max(n, 1) if color_counts else 1.0
+    if distinct_cols < 4 or max_col_share > 0.72:
+        add("MONOCHROME", f"the coloring is too monochrome ({distinct_cols} distinct color bucket(s), dominant color covers {max_col_share * 100:.0f}% of parts). Use cream/tan `secondary` on chest/belly/muzzle/fingers/toes, gold `trim` on bracers/crown/armor, bright `accent` on eyes, and white `light` on teeth/claws!",
+            True, 16)
+
+    tilted = sum(1 for p in parts if lean_deg(p) > 2)
+    tilt_share = tilted / max(n, 1)
+    box_n = sum(1 for p in parts if p["shape"] == "box")
+    block_share = box_n / max(n, 1)
+
+    score = max(0, int(round(score)))
+    grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D"
     return {
-        "issues": [], "score": int(score), "grade": grade,
-        "ext": ext, "tilted": 0, "colors": 4,
+        "issues": issues, "score": score, "grade": grade,
+        "ext": ext, "tilted": tilted, "colors": distinct_cols,
         "diag": {
             "readout": f"{n} parts · {ext[0]:.1f} × {ext[1]:.1f} × {ext[2]:.1f} studs",
-            "overlap_check": "Clean interlocking geometry.",
-            "proportion_check": "Well-balanced silhouette proportions.",
-            "floating_check": "Fully connected kinematic assembly.",
-            "detail_check": f"{n} parts generated with high-fidelity creative structuring.",
+            "overlap_check": overlap_msg,
+            "proportion_check": prop_msg,
+            "floating_check": float_msg,
+            "detail_check": f"{n} parts (target {lo}-{hi}), {block_share * 100:.0f}% blocks, {tilt_share * 100:.0f}% angled, {distinct_cols} contrasting color zones.",
         },
     }
 
@@ -619,16 +1358,42 @@ def process_build(data: Dict[str, Any], cat: str, sub: str, lo: int, hi: int, pr
     raw = data.get("ops") if isinstance(data.get("ops"), list) else data.get("parts")
     if not isinstance(raw, list) or not raw:
         raise ValueError("The AI returned no parts.")
-    palette = ((data.get("plan") or {}).get("palette") or {}) if isinstance(data.get("plan"), dict) else {}
-    base = str(palette.get("base", "#8fe3a9")) if isinstance(palette, dict) else "#8fe3a9"
-    parts = normalize_ops(raw, unit, base, cat, sub)
+    if not isinstance(data.get("plan"), dict):
+        data["plan"] = {}
+    if not isinstance(data["plan"].get("palette"), dict):
+        data["plan"]["palette"] = {}
+    palette = data["plan"]["palette"]
+    base = str(palette.get("base", "#1c2430"))
+    parts = normalize_ops(raw, unit, base if re.fullmatch(r"#[0-9a-fA-F]{6}", base) else "#1c2430", cat, sub)
     if len(parts) < 3:
         raise ValueError("The AI returned fewer than 3 usable parts.")
+    enforce_roblox_budget(parts, cat)
+    limit_lean(parts)
+    enforce_color_blocking(parts, palette, prompt, cat)
     parts = dedupe(parts)
     frame(parts)
+    stitched = stitch_articulated_chains(parts)
+    ov1 = fix_coplanar(parts)
+    snapped = snap_floating(parts) + stitched
     frame(parts)
-    overlap = {"pairs": 0, "names": [], "remaining": 0}
-    return parts, analyze(parts, cat, sub, lo, hi, prompt, overlap, 0)
+    ov2 = fix_coplanar(parts)
+    overlap = {"pairs": ov1["pairs"] + ov2["pairs"], "names": ov1["names"] + ov2["names"], "remaining": ov2["remaining"]}
+    return parts, analyze(parts, cat, sub, lo, hi, prompt, overlap, snapped)
+
+
+# --------------------------------------------------------------------------- output & tonal contrast
+_NO_JITTER = re.compile(r"eye|pupil|lens|light|glass|window|flame|glow|ember|spark|tooth|fang|tongue|crown|gem", re.I)
+
+
+def jitter(color: str, key: str, amt: float = 0.055) -> str:
+    r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    if l < 0.12:
+        l = 0.12 + l * 0.5
+    delta = ((zlib.crc32(key.encode()) % 1000) / 1000 - 0.5) * 2 * amt
+    l = max(0.08, min(0.95, l + delta))
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
 def export_build(parts: List[Dict[str, Any]], analysis: Dict[str, Any], tonal: bool) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -636,36 +1401,52 @@ def export_build(parts: List[Dict[str, Any]], analysis: Dict[str, Any], tonal: b
     k = min(STUD, SCENE_MAX_M / max(max(ext), 1e-6))
     ops = []
     for p in parts:
+        color = p["color"] if (not tonal or _NO_JITTER.search(p["id"])) else jitter(p["color"], p["id"])
         ops.append({
             "op": "add", "id": p["id"], "group": group_of(p["id"]), "shape": p["shape"],
             "size": [round(max(0.05, min(8.0, v * k)), 3) for v in p["size"]],
             "pos": [round(max(-12.0, min(12.0, v * k)), 3) for v in p["pos"]],
-            "rot": [round(v, 1) for v in p["rot"]], "color": p["color"], "smooth": round(p["smooth"], 3),
+            "rot": [round(v, 1) for v in p["rot"]], "color": color, "smooth": round(p["smooth"], 3),
         })
     stats = {
         "parts": len(parts), "studs": [round(v, 1) for v in ext], "scene_scale": round(k, 4),
-        "readout": f"{len(parts)} parts · {ext[0]:.1f} × {ext[1]:.1f} × {ext[2]:.1f} studs",
+        "readout": f"{len(parts)} parts \u00b7 {ext[0]:.1f} \u00d7 {ext[1]:.1f} \u00d7 {ext[2]:.1f} studs",
     }
     return ops, stats
 
 
+def better(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    ka = (-sum(1 for i in a["issues"] if i["blocking"]), a["score"])
+    kb = (-sum(1 for i in b["issues"] if i["blocking"]), b["score"])
+    return ka > kb
+
+
+# --------------------------------------------------------------------------- pipeline
 async def ask_and_parse(system: str, user: str, provider: str, model: str, api_key: str, retries: int = 1):
-    text, engine = await call_llm(system, user, provider, model, api_key)
-    data = parse_llm_json(text)
-    if isinstance(data.get("ops") or data.get("parts"), list) and (data.get("ops") or data.get("parts")):
-        return data, engine
-    raise HTTPException(status_code=422, detail="The AI answer contained no valid parts.")
+    last: Optional[Exception] = None
+    for _ in range(retries + 1):
+        try:
+            text, engine = await call_llm(system, user, provider, model, api_key)
+        except ProviderError as e:
+            raise e.to_http()
+        data = parse_llm_json(text)
+        if isinstance(data.get("ops") or data.get("parts"), list) and (data.get("ops") or data.get("parts")):
+            return data, engine
+        last = ValueError("The AI answer contained no parts.")
+    raise HTTPException(status_code=422, detail=str(last))
 
 
 def response_payload(title: str, cat: str, data: Dict[str, Any], parts, analysis, tonal: bool,
                      engine: Dict[str, str], revisions: int, used_serper: bool) -> Dict[str, Any]:
     ops, stats = export_build(parts, analysis, tonal)
     diag = dict(analysis["diag"])
-    diag["quality"] = f"Grade {analysis['grade']} ({analysis['score']}/100)"
+    diag["quality"] = (f"Grade {analysis['grade']} ({analysis['score']}/100)"
+                       + (f" after {revisions} automatic revision{'s' if revisions != 1 else ''}" if revisions else ""))
     return {
         "title": str(data.get("title") or title)[:60], "category": cat, "ops": ops, "stats": stats,
         "diagnostics": diag,
-        "quality": {"score": analysis["score"], "grade": analysis["grade"], "revisions": revisions, "issues_left": []},
+        "quality": {"score": analysis["score"], "grade": analysis["grade"], "revisions": revisions,
+                    "issues_left": [i["msg"] for i in analysis["issues"]]},
         "plan": data.get("plan") if isinstance(data.get("plan"), dict) else None,
         "engine": engine, "used_serper": used_serper,
     }
@@ -717,9 +1498,37 @@ async def generate(req: GenerateRequest):
     system = build_system_prompt(cat, sub, wings, lo, hi)
     user = build_user_prompt(prompt, cat, sub, lo, hi, web_ctx)
 
+    started = time.monotonic()
     data, engine = await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")
-    parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
-    return JSONResponse(content=response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 0, bool(web_ctx)))
+    if not matched and not (req.category or "") and str(data.get("category", "")).lower() in PART_RANGE:
+        cat = str(data["category"]).lower()
+        lo, hi = part_range(cat, req.target_parts)
+    try:
+        parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    revisions = 0
+    do_revise = AUTO_REVISE if req.revise is None else req.revise
+    rounds = MAX_REVISIONS if req.max_revisions is None else max(0, min(2, req.max_revisions))
+    for _ in range(rounds if do_revise else 0):
+        blocking = [i["msg"] for i in analysis["issues"] if i["blocking"]]
+        if not blocking:
+            break
+        elapsed = time.monotonic() - started
+        if elapsed > REVISE_BUDGET_S * (revisions + 1) / (revisions + 2):
+            break
+        try:
+            d2, _eng = await ask_and_parse(system, build_revision_prompt(prompt, cat, lo, hi, parts, blocking),
+                                           req.provider or "", req.model or "", req.api_key or "", retries=0)
+            p2, a2 = process_build(d2, cat, sub, lo, hi, prompt)
+        except (HTTPException, ValueError):
+            break
+        revisions += 1
+        if better(a2, analysis):
+            data, parts, analysis = d2, p2, a2
+    return JSONResponse(content=response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation,
+                                                 engine, revisions, bool(web_ctx)))
 
 
 @app.post("/revise")
@@ -731,11 +1540,17 @@ async def revise(req: ReviseRequest):
     cat, sub, wings, _ = classify(f"{prompt} {change}", req.category or "")
     lo, hi = part_range(cat, None)
     unit = 1.0 / (req.scene_scale if req.scene_scale and req.scene_scale > 0 else STUD)
-    current = normalize_ops(req.ops, unit, "#8fe3a9", cat, sub)
+    current = normalize_ops(req.ops, unit, "#1c2430", cat, sub)
+    if len(current) < 3:
+        raise HTTPException(status_code=400, detail="ops contained fewer than 3 usable parts.")
+    frame(current)
     system = build_system_prompt(cat, sub, wings, lo, hi)
     data, engine = await ask_and_parse(system, build_revision_prompt(prompt, cat, lo, hi, current, [], change),
                                        req.provider or "", req.model or "", req.api_key or "")
-    parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
+    try:
+        parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return JSONResponse(content=response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 1, False))
 
 
@@ -748,28 +1563,75 @@ async def skill(prompt: str = "", category: str = ""):
 
 @app.post("/test-key")
 async def test_key(req: TestKeyRequest):
-    return {"ok": True, "message": "API key verified!"}
+    prov, key, model = req.provider.lower().strip(), req.api_key.strip(), (req.model or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="API key is empty.")
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            if prov == "serper":
+                res = await client.post(
+                    "[https://google.serper.dev/search](https://google.serper.dev/search)",
+                    headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                    json={"q": "3D low poly model", "num": 1},
+                )
+                if res.status_code != 200:
+                    raise HTTPException(status_code=400, detail="Serper rejected key.")
+                return {"ok": True, "message": "Serper verified & active!"}
+            if prov == "gemini":
+                m = normalize_gemini_model(model or "gemini-3.8-flash")
+                res = await client.post(
+                    f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
+                    headers={"x-goog-api-key": key},
+                    json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}},
+                )
+                if res.status_code != 200:
+                    raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
+                return {"ok": True, "message": f"Gemini verified ({m})!"}
+            if prov in ("openai", "groq"):
+                base = "[https://api.openai.com/v1](https://api.openai.com/v1)" if prov == "openai" else "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
+                m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
+                payload: Dict[str, Any] = {"model": m, "messages": [{"role": "user", "content": "OK"}]}
+                payload["max_completion_tokens" if _is_reasoning(m) else "max_tokens"] = 64 if _is_reasoning(m) else 10
+                await _post_healing(client, prov, base + "/chat/completions", {"Authorization": f"Bearer {key}"}, payload)
+                return {"ok": True, "message": f"{prov.title()} verified!"}
+            if prov == "anthropic":
+                await _post_healing(
+                    client,
+                    "anthropic",
+                    "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)",
+                    {"x-api-key": key, "anthropic-version": "2023-06-01"},
+                    {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]},
+                )
+                return {"ok": True, "message": "Anthropic verified!"}
+            raise HTTPException(status_code=400, detail="Unknown provider")
+        except HTTPException:
+            raise
+        except ProviderError as e:
+            raise HTTPException(status_code=400, detail=f"{e.provider} rejected the key: {e.message}"[:1000])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v16", "providers": [k for k, v in ENV_KEYS.items() if v]}
+    return {"status": "healthy", "version": "v17", "providers": [k for k, v in ENV_KEYS.items() if v],
+            "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL}
 
 
 def find_ui() -> Optional[Path]:
     here = Path(__file__).parent
+    if (here / "index.html").exists():
+        return here / "index.html"
     found = sorted(here.glob("Verdant_3D*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if found:
-        return found[0]
-    return here / "index.html" if (here / "index.html").exists() else None
+    return found[0] if found else None
 
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_ui():
     html_path = find_ui()
-    if html_path and html_path.exists():
+    if html_path:
         return FileResponse(html_path, media_type="text/html")
-    return HTMLResponse("<h3>index.html not found - please place your Verdant UI file next to server.py</h3>")
+    return HTMLResponse("<h3>index.html not found - put the Verdant page next to server.py</h3>")
 
 
 if __name__ == "__main__":
