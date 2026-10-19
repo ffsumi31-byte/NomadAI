@@ -1,5 +1,11 @@
 """
-Verdant 3D - Roblox-native multi-AI backend (v14)
+Verdant 3D - Roblox-native multi-AI backend (v15)
+
+Upgrades in v15:
+E. "Lean" (X/Z rotation) is now measured separately from turning (Y rotation), so radial arm fans
+   are no longer counted as tilted; leaning is auto-flattened on heads/mantles/bodies/details.
+F. Cephalopod blueprint now has an exact numeric template (head, eyes, fat mantle steps, arm chains)
+   and the checker rejects pointy "witch hat" mantles, over-tall mantles and tiny eyes.
 
 Upgrades in v14 (Roblox-native modelling):
 A. Prompt rewritten block-first: >=75% Roblox Blocks, stepped curves instead of spheres,
@@ -46,7 +52,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v14)")
+app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v15)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -160,8 +166,8 @@ ROBLOX BUILD LAWS (FOLLOW STRICTLY):
    - `cylinder` = Roblox Cylinder. Only for things that are really round and straight: wheels, barrels, pillars, pipes, trunks, wands, gun barrels. Never for organic limbs, tentacles, tails or necks.
    - `sphere` = Roblox Ball. At most 8% of parts, ONLY for eyes, pearls, gems, orbs, balls, small knobs. Never for heads, bodies, bellies, mantles, fins, or foliage.
    - `cone` and `torus` do not exist in Roblox. Use them at most 3 times in a whole model, only for tiny spikes or ring/halo accents.
-3. CURVES = STEPS. Make a dome, a belly, a mantle, a head or a hill from 3-6 stacked or stepped blocks that each shrink 12-20% (a staircase silhouette), not from one round shape. Make a taper by chaining boxes that get thinner.
-4. STAY AXIS-ALIGNED. At least 65% of parts must have rot [0,0,0]. Tilt only where a real builder would tilt a Block: slopes (hoods, roofs, windshields), wings, spars, bent limb segments, tails. Tilt on ONE axis at a time, in 15 degree steps (15, 30, 45, 60, 75, 90). Eyes, pupils, trim, teeth, windows and plates are never tilted.
+3. CURVES = STEPS. Make a dome, a belly, a head or a hill from 3-6 stacked or stepped blocks (a staircase silhouette), not from one round shape. A dome shrinks 12-20% per step toward its top. A torpedo or mantle is FAT: widest in the middle, and its last step is never narrower than 60% of its widest step, so it never tapers to a point (a pointy stack looks like a witch hat). Make a limb taper by chaining boxes that get thinner.
+4. STAY SQUARE TO THE GRID. Turn parts to face a direction with Y rotation (15 degree steps) freely, for example a radial fan of arms. But LEAN a part (X or Z rotation) only where a real builder would tilt a Block: slopes (hoods, roofs, windshields), wings, spars, tails, horns, bent limb segments. At least 70% of parts must have rot X = 0 and rot Z = 0. NEVER lean heads, mantles, bodies, torsos, belly plates, eyes, pupils, trim, teeth, windows or fins: build a slant as a staircase of blocks shifted back and up instead.
 5. CHUNKY SIZES. Every body mass and limb segment is at least 1.5 studs thick. Only eyes, pupils, teeth, suckers, rivets and trim may be smaller (0.4-1.2 studs). A Roblox build reads best with a big head, thick limbs and clear gaps between fingers/legs.
 6. `smooth` is only a tiny bevel: 0.0-0.08 on boxes, up to 0.25 on cylinders. Do NOT raise it to fake roundness.
 7. CYLINDER AXIS RULE: a `cylinder` always has its length along local Y (`size[1]`) and diameter on `size[0]` and `size[2]`, which must be EQUAL (`[diameter, length, diameter]`). To lay it along Z use `"rot": [90, 0, 0]`; to lay it along X (wheels, axles) use `"rot": [0, 0, 90]`.
@@ -172,12 +178,17 @@ ROBLOX BUILD LAWS (FOLLOW STRICTLY):
 
 BLUEPRINTS = {
     "creature_multi": """BLUEPRINT - CEPHALOPOD (SQUID / OCTOPUS / KRAKEN) OR ARACHNID / CRUSTACEAN, @LO@-@HI@ parts, built from Roblox blocks:
-- IF SQUID / OCTOPUS / KRAKEN / CUTTLEFISH:
-  - POSE: wide rearing stance spanning 26-36 studs across X and Z, mantle rising behind the head. NEVER a thin vertical tube.
-  - MANTLE (18-24 parts): a STEPPED, tapering stack of 6-8 blocks (`Mantle_1` .. `Mantle_8`). Each step is 12-18% smaller than the one below and sits 1-2 studs further back (-Z) and higher, so the stack leans back like a staircase without rotating. Add 3 lighter belly plates on the front face (`Mantle_Belly1..3`), a dark dorsal crest of 3-4 small blocks, a wide flat collar block (`Mantle_Collar`) where mantle meets head, and a siphon block under the head.
-  - FINS (8-10 parts): two flat wide plates on the upper mantle, one each side (`Fin_L_1..4`, `Fin_R_1..4`), 0.8-1.2 studs thick, stepping outward and getting thinner like a diamond.
-  - HEAD (12-16 parts): a wide chunky head block (`Head_Core`), brow blocks above the eyes, two LARGE square eyes (`Eye_L`, `Eye_R`, bright yellow #ffd84d, 2.5-3 studs) on the outer-front faces, a tall thin dark pupil block on each (`Pupil_L`, `Pupil_R`, proud 0.15), and a dark two-block beak (`Beak_Upper`, `Beak_Lower`) at the centre of the arm crown.
-  - 8 ARMS + 2 FEEDING TENTACLES (10 limbs x 5-6 blocks): each limb is an unbroken chain of box segments (`Arm_FL_Seg1..4`, `Tentacle_L_Seg1..5`) that starts at the arm crown under the head, fans out radially across X and Z, tapers about 15% per segment and ends near the ground. Seg1 is at least 2 studs thick. Bend a limb with at most two 15-30 degree turns and keep the rest axis-aligned. Feeding tentacles are longer and end in a wider club block (`Tentacle_L_Club`). Add 2-3 small light sucker blocks (0.7 studs, proud 0.15, `Arm_FL_Suck1..2`) on the underside or inner face of each arm.
+- IF SQUID / OCTOPUS / KRAKEN / CUTTLEFISH: copy this EXACT TEMPLATE (all numbers in studs, front = +Z, ground y=0), then scale/recolour it to the subject and add detail up to the part target. Do NOT lean any of these parts.
+  - HEAD: `Head_Core` box size [12,7,10] at [0,7.5,2]. `Head_Brow_L` / `Head_Brow_R` boxes [4.5,1.2,1.4] at [-4,11.2,7.2] / [4,11.2,7.2]. A flat wide `Head_Collar` box [13,1.4,11] at [0,11.7,1.5].
+  - EYES (BIG and obvious, they are the face): `Eye_L` / `Eye_R` boxes [3.4,3.4,0.9] at [-4,8.6,7.4] / [4,8.6,7.4], bright yellow #ffd84d. `Pupil_L` / `Pupil_R` dark boxes [0.8,2.6,0.5] at [-4,8.6,8.0] / [4,8.6,8.0]. Optional 2 tiny white highlight blocks.
+  - BEAK: `Beak_Upper` dark box [2.4,1.6,2.2] at [0,6.4,7.6], `Beak_Lower` dark box [1.8,1.2,1.8] at [0,5.0,7.4].
+  - MANTLE: a FAT STEPPED TORPEDO, 7 boxes `Mantle_1` .. `Mantle_7`, each 3.2 tall, every step 2.2 higher and 3.2 further back than the last, NOT rotated:
+      Mantle_1 [11,3.2,10] at [0,13.0,-1.0]; Mantle_2 [12,3.2,11] at [0,15.2,-4.2]; Mantle_3 [12.5,3.2,11.5] at [0,17.4,-7.4]; Mantle_4 [12,3.2,11] at [0,19.6,-10.6]; Mantle_5 [11,3.2,10] at [0,21.8,-13.8]; Mantle_6 [9.5,3,8.5] at [0,24.0,-17.0]; Mantle_7 [7.5,2.6,6.5] at [0,26.0,-20.0].
+    Widest steps are in the middle; the tip is still 60% as wide as the widest step. Add 3 lighter belly plates on the mantle front/underside (`Mantle_Belly1..3`, 0.6 thick, proud 0.15), 4 small dark crest blocks along the top (`Mantle_Crest1..4`), and a `Mantle_Siphon` block under the head.
+  - FINS (8-10 parts): two flat wide plates, one each side, on the mid mantle at y about 18..20: `Fin_L_1..4` / `Fin_R_1..4`, 0.9 thick, [4,0.9,6] stepping outward 1.8 per block and getting 0.6 smaller each, NOT leaned.
+  - 8 ARMS (radial fan from the arm crown at [0,5,2]): arm A has yaw angle 0, 45, 90, 135, 180, 225, 270, 315 degrees (0 = straight ahead +Z). Segment k (1..4) of an arm sits at radius r = 5.5 + 4.2*(k-1) from the crown: pos = [r*sin(A), y_k, 2 + r*cos(A)] with y_k = 4.6, 3.6, 2.6, 1.4, size [3.0,2.8,4.6], [2.6,2.4,4.6], [2.2,2.0,4.4], [1.8,1.6,4.0] and rot [0, A, 0]. Name them `Arm_FL_Seg1..4` etc. Give every arm 2 small light sucker blocks `Arm_FL_Suck1..2` (0.8 studs, proud 0.15) under/inside the segments 2 and 3.
+  - 2 FEEDING TENTACLES: same recipe but 4 segments + a club (`Tentacle_L_Seg1..4` + `Tentacle_L_Club`), yaw about +-25 degrees from front, radius step 4.2, segment size [2.4,2.2,4.6] shrinking to [1.8,1.7,4.2], the club a wider block [3.6,3.0,4.6] at radius 22.5 with 2 sucker blocks.
+  - Never a thin vertical tube. The finished model spans about 30-50 studs across X and Z.
 - IF SPIDER / SCORPION / CRAB:
   - Chunky block cephalothorax + stepped abdomen, 8 (or 6/10) legs as 3-4 block chains (`Leg_FL_Seg1..4`) with a clear knee bend, claws as two-block pincers, a cluster of small eye blocks, and a segmented block tail with a stinger if scorpion.""",
 
@@ -834,6 +845,46 @@ def enforce_roblox_budget(parts: List[Dict[str, Any]], cat: str) -> int:
     return changed
 
 
+def _dist90(a: float) -> float:
+    return abs(((a + 45.0) % 90.0) - 45.0)
+
+
+def lean_deg(p: Dict[str, Any]) -> float:
+    """How far a part leans (X/Z rotation away from a multiple of 90). Y rotation only turns the part, so it is ignored."""
+    return max(_dist90(p["rot"][0]), _dist90(p["rot"][2]))
+
+
+_LEAN_OK = re.compile(r"tail|wing|spar|feather|roof|hood|windshield|glass|slope|ramp|horn|tusk|branch|blade|antler|thorn|spike|stair|gable|ridge", re.I)
+_LIMB_RE = re.compile(r"arm|tentacle|leg|neck|finger|toe|claw|seg", re.I)
+
+
+def limit_lean(parts: List[Dict[str, Any]], max_share: float = 0.30) -> int:
+    """Roblox builders do not lean heads, mantles or bodies. Flatten lean on those; then, if there is still too much, on the gentlest limb segments."""
+    n = len(parts)
+    if n < 20:
+        return 0
+    fixed = 0
+
+    def flatten(p: Dict[str, Any]) -> None:
+        p["rot"][0] = float(round(p["rot"][0] / 90.0) * 90)
+        p["rot"][2] = float(round(p["rot"][2] / 90.0) * 90)
+
+    for p in parts:
+        if p["shape"] == "box" and lean_deg(p) > 2 and not _LEAN_OK.search(p["id"]) and not _LIMB_RE.search(p["id"]):
+            flatten(p)
+            fixed += 1
+    leaning = sorted((p for p in parts if p["shape"] == "box" and lean_deg(p) > 2 and not _LEAN_OK.search(p["id"])),
+                     key=lean_deg)
+    over = sum(1 for p in parts if lean_deg(p) > 2) - int(max_share * n)
+    for p in leaning:
+        if over <= 0:
+            break
+        flatten(p)
+        fixed += 1
+        over -= 1
+    return fixed
+
+
 def _snap_q(v: float, q: float = 0.25) -> float:
     return round(v / q) * q
 
@@ -1187,7 +1238,23 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
         ratio = horiz / max(ext[1], 1.0)
         prop_msg = f"Mantle & tentacles span {ext[0]:.1f} × {ext[2]:.1f} studs wide and {ext[1]:.1f} studs tall (spread ratio {ratio:.2f})."
         if ratio < 0.55:
-            add("PROPORTION", f"the {prompt} looks like a narrow vertical tube ({horiz:.1f} wide vs {ext[1]:.1f} tall). Spread the 8 arms & 2 tentacles wide outward in X and Z (at least 26 studs across) and sculpt a bulbous mantle dome.", True, 18)
+            add("PROPORTION", f"the {prompt} looks like a narrow vertical tube ({horiz:.1f} wide vs {ext[1]:.1f} tall). Spread the 8 arms & 2 tentacles wide outward in X and Z (at least 26 studs across) and build a fat stepped mantle.", True, 18)
+        mant = [p for p in parts if re.match(r"^Mantle_(?!Belly|Crest|Spot|Siphon|Collar)[A-Za-z]*\d+$", p["id"])]
+        if len(mant) >= 3:
+            widths = [max(p["size"][0], p["size"][2]) for p in mant]
+            wmax = max(widths)
+            top = max(mant, key=lambda p: p["pos"][1])
+            wtop = max(top["size"][0], top["size"][2])
+            mlo, mhi = bounds(mant)
+            mh = mhi[1] - mlo[1]
+            if wtop < 0.5 * wmax:
+                add("MANTLE_POINTY", f"the mantle tapers to a point (tip {wtop:.1f} studs vs widest {wmax:.1f}) and looks like a witch hat. Keep the last mantle step at least 60% as wide as the widest one.", True, 15)
+            if mh > 2.3 * wmax:
+                add("MANTLE_TALL", f"the mantle is {mh:.1f} studs tall but only {wmax:.1f} wide. Make it fatter (11-12.5 studs wide) and let it sweep backward instead of straight up.", True, 12)
+            prop_msg += f" Mantle {wmax:.1f} wide, {mh:.1f} tall."
+        eyes = [p for p in parts if re.match(r"^Eye_", p["id"]) and not re.search(r"pupil|iris|shine|glint|highlight", p["id"], re.I)]
+        if eyes and max(max(p["size"]) for p in eyes) < 0.07 * ext[1]:
+            add("EYES_SMALL", f"the eyes are tiny ({max(max(p['size']) for p in eyes):.1f} studs). Make each eye at least {0.11 * ext[1]:.1f} studs so the face reads from far away.", True, 8)
     elif cat == "humanoid":
         head = [p for p in parts if group_of(p["id"]).lower() in ("head", "helmet", "skull", "face")]
         if head:
@@ -1211,13 +1278,13 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
     if len(cols) < 3:
         add("PALETTE_LOW", f"only {len(cols)} colour(s); use 4-6 contrasting colours so details pop.", True, 12)
 
-    tilted = sum(1 for p in parts if any(abs(r) > 2 for r in p["rot"]))
+    tilted = sum(1 for p in parts if lean_deg(p) > 2)
     tilt_share = tilted / max(n, 1)
     box_n = sum(1 for p in parts if p["shape"] == "box")
     block_share = box_n / max(n, 1)
     if n >= 30 and tilt_share > 0.40:
-        add("TILTED", f"{tilted} of {n} parts ({tilt_share * 100:.0f}%) are rotated. Roblox builds stay mostly axis-aligned: rebuild straight sections with rot [0,0,0] using stepped blocks, and keep tilts (15 degree steps) for slopes, wings, tails and bent limb segments only.",
-            tilt_share > 0.55, 12 if tilt_share > 0.55 else 6)
+        add("TILTED", f"{tilted} of {n} parts ({tilt_share * 100:.0f}%) lean over (rotated about X/Z). Rebuild heads, mantles, bodies and fins with rot X = 0 and Z = 0 using stepped blocks shifted back/up; keep lean (15 degree steps) for slopes, wings, tails and bent limb segments only. Turning parts with Y rotation is fine.",
+            tilt_share > 0.50, 12 if tilt_share > 0.50 else 6)
     if n >= 30 and block_share < 0.62:
         add("ROUNDED", f"only {block_share * 100:.0f}% of parts are blocks. Rebuild heads, bodies, limbs and fins from box parts and stepped blocks; keep spheres for eyes and gems only.",
             True, 12)
@@ -1232,7 +1299,7 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
             "overlap_check": overlap_msg,
             "proportion_check": prop_msg,
             "floating_check": float_msg,
-            "detail_check": f"{n} parts (target {lo}-{hi}), {block_share * 100:.0f}% blocks, {tilt_share * 100:.0f}% tilted, {len(cols)} colours.",
+            "detail_check": f"{n} parts (target {lo}-{hi}), {block_share * 100:.0f}% blocks, {tilt_share * 100:.0f}% leaning, {len(cols)} colours.",
         },
     }
 
@@ -1247,6 +1314,7 @@ def process_build(data: Dict[str, Any], cat: str, sub: str, lo: int, hi: int, pr
     if len(parts) < 3:
         raise ValueError("The AI returned fewer than 3 usable parts.")
     enforce_roblox_budget(parts, cat)
+    limit_lean(parts)
     parts = dedupe(parts)
     frame(parts)
     stitched = stitch_articulated_chains(parts)
@@ -1491,7 +1559,7 @@ async def test_key(req: TestKeyRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v14", "providers": [k for k, v in ENV_KEYS.items() if v],
+    return {"status": "healthy", "version": "v15", "providers": [k for k, v in ENV_KEYS.items() if v],
             "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS}
 
 
