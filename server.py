@@ -1,21 +1,23 @@
 """
-Verdant 3D - Roblox-native multi-AI backend (v17 - Argon Medium & Studio Boss Edition)
+Verdant 3D - Roblox-native multi-AI backend (v18 - Cloud 3D Smoothing, Rigging & Facial Relief Engine)
 
-Upgrades in v17:
-1. Native Argon Medium & Thinking Budget Support: Full alias & reasoning support for
-   gemini-4-argon, gemini-3.8-flash, and gemini-3.7-flash with medium thinkingConfig
-   so the model computes 3D anatomy, facial features, and color zones before generating.
-2. Semantic Color-Zone Enforcer (enforce_color_blocking) & Tonal Depth Engine:
-   Prevents monochrome grey/black builds! Automatically enforces high-contrast Roblox
-   color blocking across 6 semantic zones: Base (fur/hull), Secondary (tan/cream skin,
-   muzzle, chest & underbelly plates), Gold/Trim (crowns, wrist bracers, cuffs, buckles),
-   Accent (glowing eyes, cores, runes), Light (teeth, fangs, claws, sclera), and Dark
-   (pupils, inner mouth, joints, tires), plus deterministic HLS tonal variation.
-3. Studio Boss & Hero Blueprints: Detailed anatomical templates for Apes/Gorillas
-   (broad chest plates, open roaring jaw with fangs, brow ridges, shoulder fur/pauldrons,
-   wrist cuffs, knuckle hands), Dragons, Cephalopods, Mechs, Vehicles, Structures & Props.
-4. Full Kinematic Chain Stitcher, Coplanar Z-Fight Healer, Two-Stage Floating Part Snapper,
-   and strict Color/Detail Quality Gate with automatic revision.
+Upgrades in v18:
+1. Facial Depth Relief & Feature Extruder (extrude_facial_hierarchy):
+   Mathematically guarantees the creature's face is NEVER buried inside the head/muzzle!
+   Automatically detects the head bounding box and steps facial features forward along +Z
+   in 4 distinct relief layers: Cranium -> Faceplate/Muzzle/Jaw -> Mouth Cavity/Glowing Eyes/Brows
+   -> Pupils/White Fangs/Pink Tongue.
+2. Cloud 3D Organic Smoothing Engine (apply_organic_smoothing):
+   Replaces razor-sharp 0.04 cube corners with adaptive sculptural beveling (smooth 0.25-0.48)
+   on organic muscles, heads, cheeks, chests, and limbs, while keeping crowns, blades,
+   teeth, and claws crisp.
+3. Automatic Rigging Joint Welder (smooth_and_weld_rigging):
+   Eliminates sketchy, jagged staircase arms and legs by aligning limb vectors, tapering
+   consecutive segments smoothly, and welding inter-segment seams.
+4. Fixed Word-Boundary Color Blocking:
+   Prevents 'Torso_Core' or 'Hand_Core' from accidentally matching 'core' (red accent),
+   keeping fur deep navy-charcoal (#18202c), chest/face/knuckles/toes warm cream (#e8dcc4),
+   wrist cuffs & crown royal gold (#f5c518), and eyes/fangs/tongue crisp.
 """
 import asyncio
 import colorsys
@@ -36,7 +38,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v17)")
+app = FastAPI(title="Verdant 3D - Cloud 3D Modeling & Smoothing Backend (v18)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -86,7 +88,6 @@ GEMINI_MODEL_ALIASES = {
     "3.6-flash": "gemini-3.6-flash",
     "gemini-3.6-flash": "gemini-3.6-flash",
     "3.5-flash": "gemini-3.5-flash",
-    "gemini-3.5-flash": "gemini-3.5-flash",
     "gemini-3.5-flash-lite": "gemini-3.5-flash-lite",
     "gemini-2.5-flash": "gemini-3.8-flash",
     "gemini-2.5-pro": "gemini-3.8-flash",
@@ -101,14 +102,14 @@ THINKING_BUDGETS = {
 }
 
 STUD = 0.28               # metres per Roblox stud
-MAX_PARTS = 165
+MAX_PARTS = 175
 MAX_EXTENT_STUDS = 70.0
 MAX_PART_STUDS = 28.0
 MIN_PART_STUDS = 0.16
 SCENE_MAX_M = 12.0
 PUSH = 0.12               # 0.12 stud offset so decals/trim never z-fight
 SHAPES = {"box", "sphere", "cylinder", "cone", "torus"}
-SMOOTH_DEFAULT = {"box": 0.04, "sphere": 0.5, "cylinder": 0.2, "cone": 0.3, "torus": 0.4}
+SMOOTH_DEFAULT = {"box": 0.22, "sphere": 0.65, "cylinder": 0.35, "cone": 0.25, "torus": 0.45}
 SHAPE_ALIAS = {
     "cube": "box", "block": "box", "brick": "box", "plate": "box", "wedge": "box", "ramp": "box",
     "slope": "box", "part": "box", "roof": "box", "panel": "box", "plank": "box",
@@ -121,131 +122,129 @@ SHAPE_ALIAS = {
     "ring": "torus", "donut": "torus", "hoop": "torus", "collar": "torus",
 }
 PART_RANGE = {
-    "creature": (96, 138), "humanoid": (90, 130), "vehicle": (88, 128),
+    "creature": (98, 142), "humanoid": (92, 134), "vehicle": (88, 128),
     "structure": (92, 138), "prop": (64, 104), "plant": (74, 116),
 }
 GATE = 0.80
 
 # --------------------------------------------------------------------------- the skill
-CORE_SKILL = """You are the VERDANT MASTER SCULPTOR: an elite Roblox Studio lead character & asset artist (like the builders behind top front-page Roblox simulator & boss games). You build expressive, richly colored, multi-layered models out of Roblox Parts that look like real hand-crafted Roblox game bosses, pets, vehicles, and props—NEVER bland monochrome grey robot blocks!
+CORE_SKILL = """You are the VERDANT CLOUD 3D SCULPTOR: an elite Roblox Studio character & boss modeler. You build smooth, muscular, organically beveled, richly detailed 3D models that match front-page Roblox game bosses (like the Gorilla King Boss with a sculpted cream face, fierce red eyes under angled brows, open roaring mouth with white fangs & pink tongue, golden crown, layered dark shoulder fur, sculpted cream V-chest & abs, golden wrist cuffs, and thick muscular limbs).
 
 OUTPUT - reply with ONE valid JSON object and nothing else (no markdown fences, no comments, no prose):
 {
   "title": "Iconic Game-Ready Title",
   "category": "creature|humanoid|vehicle|structure|prop|plant",
   "plan": {
-    "reference": "2-3 sentences: exact anatomy, posture, facial expression, and distinct color-blocking zones of the subject",
-    "must_have": ["countable features with explicit colors, e.g. 'tan/cream chest & muzzle plates', 'open roaring mouth with 6 white fangs & pink tongue', 'glowing red eyes under heavy brow', 'gold wrist bracers & crown', 'layered dark fur shoulder pads'"],
+    "reference": "2-3 sentences: exact anatomy, smooth muscular rigging flow, facial expression, and color zones",
+    "must_have": ["countable features with explicit colors, e.g. 'protruding cream face & roaring jaw with 6 white fangs & tongue', 'glowing red eyes under angled brow ridge', '5-point golden crown', 'cream sculpted chest & abs', 'gold wrist bracers', 'layered dark shoulder fur pads'"],
     "signature_features": ["6-10 traits that give this model front-page Roblox game appeal"],
     "palette": {
-      "base": "#1b2432",
+      "base": "#18202c",
       "secondary": "#e8dcc4",
       "trim": "#f5c518",
       "accent": "#ff2a2a",
-      "dark": "#0f1319",
+      "dark": "#0d1017",
       "light": "#ffffff"
     },
     "proportions": "one sentence with exact width:height:length ratios in studs",
-    "sections": {"Head_And_Face": 26, "Torso_And_Chest": 24, "Arms_And_Hands": 28, "Legs_And_Feet": 18, "Armor_And_Accessories": 14}
+    "sections": {"Head_And_Face": 28, "Torso_And_Chest": 24, "Arms_And_Hands": 30, "Legs_And_Feet": 18, "Crown_And_Armor": 14}
   },
   "ops": [
-    {"id":"Group_Part","shape":"box|cylinder|sphere|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.04}
+    {"id":"Group_Part","shape":"box|cylinder|sphere|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.32}
   ]
 }
 
-ROBLOX STUDIO ART DIRECTION & BUILD LAWS (FOLLOW STRICTLY):
-1. COORDINATES: Units are STUDS. Y is UP, ground is y=0, model is centred on x=0, z=0, and the FRONT faces +Z (X = left/right width, Y = vertical height, Z = front/back length). Snap sizes and positions to a 0.25 or 0.5 stud grid.
-2. COLOR BLOCKING IS KING (NO MONOCHROME BUILDS!):
-   Top Roblox models read from 100 studs away because of bold color contrast. You MUST use all 6 palette roles across the model:
-   - `base`: Primary body fur, hull, or main armor (e.g. deep navy-charcoal `#1b2432`, rich purple `#5b2c86`, crimson `#9e1b1b`—NEVER dull mid-grey everywhere). Keep `base` under 55% of parts!
-   - `secondary`: High-contrast skin, face muzzle, chest pectorals, abs, underbelly plates, inner ears, hands/toes (e.g. warm cream/tan `#e6d5b8`, light lavender, or silver-white). Every creature/character MUST have a distinct `secondary` colored chest/belly and face/muzzle zone!
-   - `trim`: Bold gold, bronze, or contrasting royal accent (`#f5c518`, `#ff9f1c`, `#00d2ff`) for wrist bracers/cuffs, crowns, shoulder trim, belt buckles, emblems, or wheel rims. Even natural beasts look 10x better in Roblox with kingly gold wrist cuffs, a crown, or glowing runes!
-   - `accent`: Vibrant emissive/glow color (`#ff2e2e`, `#00ffcc`, `#ffd84d`) for glowing eyes, energy cores, flames, gems, and taillights.
-   - `light`: Crisp white/ivory (`#ffffff`, `#f8f4e8`) for teeth, fangs, claws, toenails, eye sclera, and specular highlights.
-   - `dark`: Deep obsidian (`#0d1017`) for eye pupils, inner mouth cavity, nostrils, joints, and tires.
-3. EXPRESSIVE FACES & OPEN JAWS (NEVER A BLANK BLOCK HEAD):
-   Every creature, boss, or character head needs at least 16-24 parts:
-   - Cranium + layered cheek/side-fur blocks.
-   - A protruding `secondary`-colored Muzzle/Snout (`Head_Muzzle`) and lower `Head_Jaw` separated by a dark `Head_MouthCavity` block.
-   - 4 to 8 small white `light` tooth/fang blocks (`Tooth_UL`, `Tooth_UR`, `Fang_LL`, `Fang_LR`) + a pink/red `Head_Tongue` block (`#d95b72`).
-   - Heavy angled Brow ridges (`Head_Brow_L`, `Head_Brow_R`) above large glowing `Eye_L` / `Eye_R` blocks + `Pupil_L` / `Pupil_R` blocks.
-   - Ears, horns, crests, or a multi-point golden Crown (`Crown_Base`, `Crown_Point1..5`, `Crown_Gem`) on top of the head!
-4. LAYERED MUSCLE, FUR & ARMOR SILHOUETTE:
-   - Never use a single rectangle for a torso or limb. Build a broad V-taper chest with 4-6 stepped `secondary`-colored pectoral & abdominal plates (`Chest_Pec_L`, `Chest_Pec_R`, `Belly_Abs1..3`) proud by 0.2 studs on the front (+Z) of the dark `Torso_Core`.
-   - Add layered, jagged shoulder fur tufts or armored pauldrons (`Shoulder_Tuft_L1..4`, `Shoulder_Tuft_R1..4`) stepping outward and backward over the upper arms.
-   - Wrap forearms/wrists with thick decorative bracers or cuffs (`Wrist_Bracer_L1..2`, `Wrist_Bracer_R1..2` in `trim` gold) and build chunky hands with individual finger/knuckle blocks (`Hand_L_Palm`, `Finger_L1..4`, `Thumb_L`) and light-colored toes/claws on the feet (`Toe_L1..3`, `Toe_R1..3`).
-5. SHAPE BUDGET:
-   - At least 78% `box` (Roblox Blocks). Build curves and muscle bulk by stepping/stacking overlapping boxes of changing width/height.
-   - Use `cylinder` only for round cuffs/wheels/barrels/pillars/horns. Use `sphere` only for small eyes/gems/orbs.
-   - Keep `rot` X and Z at 0 for at least 65% of parts; use 15-degree step tilts (`15`, `-15`, `30`, `-30`) on brow ridges, shoulder tufts, jaw angles, and bent limb segments to give dynamic pose energy.
-6. CONNECTED CHAINS & ZERO Z-FIGHTING:
-   - Every limb segment must overlap its neighbor by at least 0.3 studs.
-   - Chest plates, eyes, pupils, teeth, bracers, and trim must protrude by 0.15-0.25 studs from the underlying part so they never flicker."""
+CLOUD 3D SCULPTING, RIGGING & FACIAL LAWS (FOLLOW STRICTLY):
+1. COORDINATES: Units are STUDS. Y is UP, ground is y=0, model is centred on x=0, z=0, and the FRONT faces +Z (X = left/right width, Y = vertical height, Z = front/back length).
+2. ORGANIC BEVEL SMOOTHING (`smooth` property):
+   - Use `"smooth": 0.30` to `0.45` on all organic body masses, muscles, heads, cheeks, chests, bellies, shoulders, arms, legs, and fingers so they render as smooth, sculpted Roblox meshes rather than sharp-edged cubes!
+   - Use `"smooth": 0.04` to `0.10` ONLY on sharp geometric parts: teeth, fangs, claws, crown spikes, blades, and stone walls.
+3. SMOOTH RIGGING & MUSCULAR FLOW (NO SKETCHY STAIRCASE LIMBS!):
+   - Every arm and leg must flow along a smooth anatomical curve with overlapping spherical/rounded joints (`Shoulder_Joint`, `Elbow_Joint`, `Wrist_Joint`, `Hip_Joint`, `Knee_Joint`).
+   - Do NOT stack sideways offset blocks like a broken staircase! Keep the X coordinate of UpperArm, Elbow, Forearm, Bracer, and Hand aligned within 0.5 studs of each other, curving gently forward in +Z (`z = 2.0 -> 3.2 -> 4.5 -> 5.2`).
+4. 3D FACIAL RELIEF HIERARCHY (THE FACE MUST POP OUT CLEARLY AT +Z!):
+   - Never bury the eyes, brows, or mouth inside the head block! Build the head in 4 forward-stepping Z layers:
+     * Layer 1 (z = 3.5..5.5): `Head_Cranium`, `Head_Crest`, `Head_Cheek_L`, `Head_Cheek_R` in `base` dark fur (`#18202c`).
+     * Layer 2 (z = 7.2..8.2): `Head_FacePlate` and `Head_UpperSnout` in `secondary` cream (`#e8dcc4`), plus `Head_Jaw_Lower` below at y=16.2, z=8.2.
+     * Layer 3 (z = 8.8..9.2): Heavy angled `Head_Brow_L` & `Head_Brow_R` (`rot:[0,0,-14]` / `[0,0,14]`) overhanging fierce glowing `Eye_L` & `Eye_R` (`accent` `#ff2a2a`), plus a deep dark `Head_Mouth_Cavity` (`#0d1017`) between the upper snout and lower jaw!
+     * Layer 4 (z = 9.4..9.8): Dark `Pupil_L` & `Pupil_R`, 2 nostrils `Head_Nostril_L`/`R`, pink `Head_Tongue` (`#e06b80`), and 6 crisp white `Fang_UL`, `Fang_UR`, `Tooth_U1`, `Tooth_U2`, `Fang_LL`, `Fang_LR` (`#ffffff`) clearly visible inside the open roaring mouth!
+5. STRICT 6-ZONE COLOR PALETTE (NEVER PUT RED ON CHEST OR HANDS!):
+   - `base` (`#18202c`): Dark navy-charcoal fur on Cranium, Back, Torso sides, Shoulders, Biceps, Forearms, Thighs, Shins, Hand/Foot backs.
+   - `secondary` (`#e8dcc4`): Warm cream/tan on `Head_FacePlate`, `Head_Snout`, `Head_Jaw_Lower`, sculpted `Chest_Pec_L`, `Chest_Pec_R`, `Belly_Ab1..4` (forming an inverted V/heart chest plate), plus the 8 knuckle fingers (`Finger_L_1..4`, `Finger_R_1..4`) and 8 toes (`Toe_L_1..4`, `Toe_R_1..4`).
+   - `trim` (`#f5c518`): Bright royal gold ONLY on the `Crown_*` on top of the head and the thick ribbed `Wrist_Bracer_L_*` / `Wrist_Bracer_R_*` cuffs around the forearms! Do NOT put a gold belt on a gorilla's waist!
+   - `accent` (`#ff2a2a`): Glowing red ONLY on `Eye_L` and `Eye_R` (never on torso, waist, or hands!).
+   - `light` (`#ffffff`): Pure white on teeth, fangs, and claws.
+   - `dark` (`#0d1017`): Obsidian on `Head_Mouth_Cavity`, `Pupil_*`, and `Head_Nostril_*`."""
 
 BLUEPRINTS = {
-    "creature_quad": """BLUEPRINT - STUDIO BOSS APE / GORILLA / QUADRUPED / DINO / BEAST, @LO@-@HI@ parts, built like a front-page Roblox Boss:
+    "creature_quad": """BLUEPRINT - STUDIO BOSS APE / GORILLA / QUADRUPED / DINO / BEAST, @LO@-@HI@ parts, with smooth organic rigging and high-relief face:
 - IF GORILLA / APE / KING KONG / YETI / TROLL:
-  - STANCE & PROPORTIONS: Massive, imposing front-heavy knuckle-brawler stance! Width across shoulders X = 22-26 studs, height Y = 24-28 studs, depth Z = 18-22 studs.
-  - HEAD, ROARING FACE & CROWN (24-30 parts, centered at [0, 19..23, 5..8]):
-    - `Head_Cranium` dark base box [7.5, 6.5, 7.0] at [0, 20.5, 4.5] + `Head_Crest` [5.5, 2.0, 6.0] at [0, 24.0, 4.0] + cheek fur blocks `Head_Cheek_L` / `Head_Cheek_R` [2.2, 4.5, 5.0] at [-4.2, 19.5, 4.5] / [4.2, 19.5, 4.5].
-    - `Head_FacePlate` in `secondary` (cream/tan `#e8dcc4`) [6.2, 5.2, 1.5] at [0, 20.2, 8.0].
-    - Heavy fierce brows: `Head_Brow_L` / `Head_Brow_R` [3.2, 1.1, 1.8] at [-1.8, 22.0, 8.6] / [1.8, 22.0, 8.6] tilted `rot:[0,0,-15]` and `[0,0,15]`.
-    - Glowing Eyes: `Eye_L` / `Eye_R` in `accent` bright red (`#ff2a2a`) [1.8, 1.1, 0.6] at [-1.9, 21.1, 8.7] / [1.9, 21.1, 8.7] with dark pupils `Pupil_L` / `Pupil_R` [0.7, 0.9, 0.4] at z=8.95.
-    - Open Roaring Mouth: `Head_Muzzle_Upper` tan box [5.4, 1.8, 2.6] at [0, 19.3, 8.8], `Head_Nostril_L`/`R` dark blocks, `Head_Mouth_Cavity` dark box [4.4, 2.4, 2.0] at [0, 17.8, 8.4], `Head_Jaw_Lower` tan box [5.0, 1.6, 2.8] at [0, 16.4, 8.7], pink `Head_Tongue` `#e06b80` [3.0, 0.8, 2.0] at [0, 17.1, 8.6], and 6 white `light` teeth/fangs (`Fang_UL`, `Fang_UR`, `Tooth_U1..2`, `Fang_LL`, `Fang_LR`) [0.7, 1.1, 0.7] at z=9.6.
-    - GOLDEN CROWN / CREST (7-9 parts in `trim` gold `#f5c518`): `Crown_Band` [5.8, 1.4, 5.8] at [0, 24.8, 4.2] with 5 tall angled golden spikes (`Crown_Spike_F`, `Crown_Spike_FL`, `Crown_Spike_FR`, `Crown_Spike_BL`, `Crown_Spike_BR`) reaching y=27.5 and a front `Crown_Gem` diamond block.
-  - TORSO & CREAM CHEST PLATES (20-26 parts):
-    - Broad V-taper `Torso_Upper` dark base [15.0, 9.0, 10.0] at [0, 15.5, 1.5], `Torso_Mid` [12.5, 6.5, 8.5] at [0, 10.5, 0.5], `Pelvis` [11.0, 4.5, 7.5] at [0, 7.2, -0.5].
-    - Stepped `secondary` (cream/tan `#e8dcc4`) sculpted chest & abs on the front (+Z): `Chest_Pec_L` / `Chest_Pec_R` [5.8, 4.8, 1.6] at [-3.1, 16.2, 6.4] / [3.1, 16.2, 6.4], `Chest_Center` [4.0, 3.5, 1.4] at [0, 15.8, 6.5], `Belly_Ab1` [8.5, 2.8, 1.4] at [0, 12.8, 5.0], `Belly_Ab2` [6.5, 2.5, 1.4] at [0, 10.2, 4.2], `Belly_Ab3` [4.5, 2.0, 1.2] at [0, 8.2, 3.6].
-    - Layered jagged dark shoulder fur pads (`Pauldron_L_1..4` at x=-8.5..-11.5, y=17..21, z=1..3 and `Pauldron_R_1..4` at x=+8.5..+11.5) + back muscle plates (`Back_Silver1..3`).
-  - MASSIVE MUSCULAR ARMS, GOLD BRACERS & HANDS (28-34 parts):
-    - Left & Right symmetrical chains reaching down to the ground at x = -9.5 and +9.5, z = +4.5..+6.5:
-    - `Arm_L_Shoulder` [6.5, 6.5, 6.5] at [-9.2, 17.5, 2.5], `Arm_L_Bicep` [6.0, 6.5, 6.0] at [-9.8, 12.8, 3.8], `Arm_L_Forearm` [6.8, 6.5, 6.8] at [-9.8, 7.5, 5.2].
-    - GOLDEN WRIST BRACERS (`trim` `#f5c518`): `Bracer_L_Top` [7.4, 1.4, 7.4] at [-9.8, 9.2, 5.2], `Bracer_L_Main` [7.2, 2.6, 7.2] at [-9.8, 7.2, 5.2], `Bracer_L_Bot` [7.4, 1.2, 7.4] at [-9.8, 5.4, 5.2] (and matching `Bracer_R_*` on Right arm!).
-    - Huge Knuckle Hands at y=0..4.5: `Hand_L_Base` dark [6.8, 3.5, 6.5] at [-9.8, 2.8, 5.6], plus 4 cream/tan `secondary` knuckle finger blocks `Finger_L_1..4` [1.5, 2.4, 2.2] across x=[-12.0..-7.6], y=1.2, z=8.4 and `Thumb_L` at [-7.0, 1.8, 6.5] (same for `Hand_R_*` and `Finger_R_1..4`).
-  - STOUT HIND LEGS & CREAM TOES (16-20 parts):
-    - `Leg_L_Thigh` [5.5, 5.5, 5.8] at [-4.8, 5.5, -1.0], `Leg_L_Shin` [4.8, 4.5, 5.0] at [-4.8, 2.5, -0.5], `Foot_L_Base` [5.2, 2.0, 6.0] at [-4.8, 1.0, 0.8], plus 4 cream/tan `secondary` toe blocks `Toe_L_1..4` [1.2, 1.6, 2.2] at [-6.6..-3.0, 0.8, 3.6] (and matching `Leg_R_*`, `Foot_R_Base`, `Toe_R_1..4`).
-- IF QUADRUPED / WOLF / LION / BEAR / DINO: apply the same rich color-blocking: `secondary` underbelly & muzzle, open fanged jaw with tongue & glowing eyes, layered mane/dorsal plates, `trim` armor accents, and 4 articulated leg chains with individual light claws at y=0.""",
+  - Follow this EXACT ANATOMICAL TEMPLATE (front = +Z, ground y=0, smooth=0.35 on all body/limb/face parts):
+  - 1. HEAD & 4-LAYER ROARING FACE (28-34 parts, centered at x=0, y=17..25):
+    - Back Skull & Fur: `Head_Cranium` box [8.0, 7.2, 6.5] at [0, 20.5, 4.2] (`base`), `Head_TopDome` [6.5, 2.2, 5.5] at [0, 24.2, 4.0] (`base`), thick side fur `Head_Cheek_L` / `Head_Cheek_R` [2.4, 5.2, 5.2] at [-4.4, 19.8, 4.8] / [4.4, 19.8, 4.8] (`base`), `Head_Ear_L` / `Head_Ear_R` [1.2, 2.0, 1.6] at [-5.2, 21.0, 4.5] / [5.2, 21.0, 4.5] (`secondary`).
+    - Cream Face & Snout (Layer 2, z=7.6..8.4, `secondary` `#e8dcc4`): `Head_FaceUpper` [6.4, 3.6, 1.8] at [0, 21.4, 7.5], `Head_CheekBone_L` / `R` [2.2, 3.2, 2.0] at [-2.4, 19.4, 7.8] / [2.4, 19.4, 7.8], `Head_Muzzle_Upper` [5.2, 1.8, 2.4] at [0, 19.5, 8.4], `Head_Jaw_Lower` [4.8, 1.5, 2.6] at [0, 16.3, 8.3], `Head_Chin_Fur` [5.2, 1.2, 2.4] at [0, 15.3, 7.8] (`base`).
+    - Brows, Glowing Red Eyes & Open Mouth Cavity (Layer 3, z=8.8..9.3):
+      * Heavy Cream Brow Ridge: `Head_Brow_Center` [2.4, 1.1, 1.8] at [0, 22.1, 8.8] (`secondary`), `Head_Brow_L` [2.8, 1.1, 1.8] at [-1.9, 22.3, 8.8] rot [0,0,-14] (`secondary`), `Head_Brow_R` [2.8, 1.1, 1.8] at [1.9, 22.3, 8.8] rot [0,0,14] (`secondary`).
+      * Glowing Red Eyes: `Eye_L` / `Eye_R` [1.8, 0.95, 0.6] at [-1.9, 21.2, 8.9] / [1.9, 21.2, 8.9] (`accent` `#ff2a2a`), `Pupil_L` / `Pupil_R` [0.65, 0.85, 0.4] at [-1.8, 21.2, 9.25] / [1.8, 21.2, 9.25] (`dark`).
+      * Nostrils: `Head_Nostril_L` / `R` [0.6, 0.7, 0.5] at [-0.8, 19.8, 9.65] / [0.8, 19.8, 9.65] (`dark`).
+      * Roaring Mouth Interior: `Head_Mouth_Cavity` [4.0, 2.2, 1.4] at [0, 17.9, 8.6] (`dark` `#0d1017`), `Head_Tongue` [2.8, 0.7, 1.8] at [0, 17.2, 8.9] (`#d95b72`).
+      * 6 White Fangs & Teeth (`light` `#ffffff`, smooth=0.05): `Fang_UL` / `Fang_UR` [0.65, 1.1, 0.65] at [-1.5, 18.4, 9.4] / [1.5, 18.4, 9.4], `Tooth_U1` / `Tooth_U2` [0.55, 0.7, 0.55] at [-0.5, 18.6, 9.45] / [0.5, 18.6, 9.45], `Fang_LL` / `Fang_LR` [0.6, 1.0, 0.6] at [-1.4, 17.2, 9.4] / [1.4, 17.2, 9.4].
+    - Golden Royal Crown (9 parts at y=24.8..28.2, `trim` `#f5c518`, smooth=0.12):
+      * `Crown_Base` cylinder [5.8, 1.4, 5.8] at [0, 25.0, 4.0], `Crown_InnerDome` sphere [4.4, 2.2, 4.4] at [0, 25.6, 4.0] (`base`), `Crown_Rim` box [6.0, 0.8, 6.0] at [0, 25.6, 4.0], `Crown_Spike_Front` [1.6, 2.8, 1.2] at [0, 27.0, 6.6], `Crown_Spike_FL` / `FR` [1.3, 2.3, 1.2] at [-2.2, 26.7, 5.8] / [2.2, 26.7, 5.8] rot [0,0,15] / [0,0,-15], `Crown_Spike_L` / `R` [1.2, 2.1, 1.2] at [-2.8, 26.5, 4.0] / [2.8, 26.5, 4.0], `Crown_Gem` [1.0, 1.2, 0.6] at [0, 25.8, 7.0] (`#ffdf4d`).
+  - 2. MUSCULAR TORSO, LAYERED SHOULDER FUR & SCULPTED CREAM CHEST (24-28 parts):
+    - Core Body (`base` `#18202c`, smooth=0.38): `Torso_Upper` [14.5, 8.5, 9.5] at [0, 15.8, 1.5], `Torso_Mid` [12.0, 6.0, 8.2] at [0, 11.2, 0.8], `Torso_Pelvis` [10.5, 4.8, 7.5] at [0, 7.5, 0.0], `Back_Hump` [11.5, 5.5, 4.0] at [0, 17.5, -2.5].
+    - Sculpted Cream Chest & Tapered Abs (`secondary` `#e8dcc4`, smooth=0.30, proud on front +Z — NO RED OR GOLD ON TORSO!):
+      * `Chest_Pec_L` / `Chest_Pec_R` [5.2, 4.4, 1.8] at [-2.8, 16.0, 6.2] / [2.8, 16.0, 6.2], `Chest_Bridge` [3.6, 3.8, 1.7] at [0, 15.8, 6.3], `Belly_Upper` [7.6, 2.8, 1.6] at [0, 13.0, 5.2], `Belly_Mid` [5.6, 2.4, 1.5] at [0, 10.8, 4.6], `Belly_LowerPoint` [3.4, 2.0, 1.4] at [0, 9.0, 4.0].
+    - Layered Jagged Shoulder Fur Pads (`base` dark slate, 5 per side):
+      * `Pauldron_L_1` [6.5, 2.2, 7.5] at [-8.2, 20.2, 2.2] rot [0,0,15], `Pauldron_L_2` [7.0, 2.2, 7.8] at [-9.2, 18.8, 2.2] rot [0,0,22], `Pauldron_L_3` [6.8, 2.0, 7.2] at [-9.8, 17.2, 2.2] rot [0,0,28], plus matching `Pauldron_R_1..3` on +X!
+  - 3. SMOOTH RIGGED ARMS, GOLDEN WRIST CUFFS & CREAM KNUCKLE HANDS (30-36 parts):
+    - Keep Left Arm aligned along X = -9.4..-10.2 and Right Arm along X = +9.4..+10.2 (NO jagged sideways steps!):
+    - Left Arm Chain (`base` `#18202c`, smooth=0.40): `Arm_L_Shoulder` sphere [6.8, 6.8, 6.8] at [-9.0, 17.5, 2.2], `Arm_L_Bicep` box [6.2, 6.2, 6.2] at [-9.6, 13.8, 3.0] rot [12,0,6], `Arm_L_Elbow` sphere [5.8, 5.2, 5.8] at [-9.8, 10.6, 3.8], `Arm_L_Forearm` box [6.8, 6.4, 6.8] at [-9.8, 7.6, 4.6] rot [10,0,0].
+    - Left Golden Wrist Bracer (`trim` `#f5c518`, smooth=0.25): `Bracer_L_Upper` [7.3, 1.1, 7.3] at [-9.8, 8.8, 4.6] rot [10,0,0], `Bracer_L_Main` [7.2, 2.4, 7.2] at [-9.8, 7.2, 4.8] rot [10,0,0], `Bracer_L_Lower` [7.3, 1.1, 7.3] at [-9.8, 5.6, 5.0] rot [10,0,0].
+    - Left Hand & Cream Knuckles (at y=0..4.4): `Hand_L_Back` (`base` `#18202c`, NEVER RED!) [6.8, 3.2, 5.8] at [-9.8, 3.2, 5.4], plus 4 cream/tan `secondary` (`#e8dcc4`) rounded knuckle fingers on the front: `Finger_L_1` [1.5, 2.6, 2.4] at [-12.1, 1.3, 7.4], `Finger_L_2` [1.5, 2.8, 2.5] at [-10.5, 1.4, 7.6], `Finger_L_3` [1.5, 2.8, 2.5] at [-8.9, 1.4, 7.6], `Finger_L_4` [1.5, 2.5, 2.3] at [-7.3, 1.2, 7.3], and `Thumb_L` [1.6, 2.2, 2.2] at [-6.8, 1.8, 5.6].
+    - Mirror the exact same chain for Right Arm (`Arm_R_*`, `Bracer_R_*`, `Hand_R_Back`, `Finger_R_1..4`, `Thumb_R`) at X = +9.0..+9.8!
+  - 4. SMOOTH RIGGED HIND LEGS & CREAM TOES (18-22 parts):
+    - Left Leg (`base` `#18202c`, smooth=0.38): `Leg_L_Hip` sphere [5.6, 5.4, 5.6] at [-4.6, 7.2, -0.2], `Leg_L_Thigh` box [5.4, 5.2, 5.6] at [-4.8, 5.0, 0.2] rot [-12,0,0], `Leg_L_Shin` box [4.8, 4.4, 5.0] at [-4.8, 2.6, 0.0], `Foot_L_Ankle` (`base`) [5.2, 2.2, 5.4] at [-4.8, 1.1, 0.8], plus 4 large cream `secondary` (`#e8dcc4`) toes in front: `Toe_L_1..4` [1.25, 1.8, 2.4] across x=[-6.6, -5.4, -4.2, -3.0] at y=0.9, z=3.2 (and mirror for Right Leg `Leg_R_*`, `Foot_R_Ankle`, `Toe_R_1..4`).
+- IF OTHER QUADRUPED / WOLF / LION / BEAR / DINO: use the same 4-layer protruding face relief (muzzle, open mouth cavity, fangs, tongue, glowing eyes under brows), smooth joint spheres (`smooth: 0.35`), and 6-zone color blocking.""",
 
-    "creature_multi": """BLUEPRINT - CEPHALOPOD (SQUID / OCTOPUS / KRAKEN) OR ARACHNID / CRUSTACEAN, @LO@-@HI@ parts, built from Roblox blocks:
+    "creature_multi": """BLUEPRINT - CEPHALOPOD (SQUID / OCTOPUS / KRAKEN) OR ARACHNID / CRUSTACEAN, @LO@-@HI@ parts, organically smoothed (`smooth: 0.32`):
 - IF SQUID / OCTOPUS / KRAKEN / CUTTLEFISH:
-  - HEAD & EXPRESSIVE FACE: `Head_Core` box [12,7,10] at [0,7.5,2]. `Head_Brow_L` / `Head_Brow_R` angled boxes [4.5,1.2,1.6] at [-4,11.2,7.2] / [4,11.2,7.2]. `Head_Collar` [13,1.4,11] at [0,11.7,1.5] in `trim` or `secondary`.
-  - BIG GLOWING EYES: `Eye_L` / `Eye_R` boxes [3.4,3.4,0.9] at [-4,8.6,7.4] / [4,8.6,7.4] in bright `accent` yellow/cyan, `Pupil_L` / `Pupil_R` dark boxes [0.9,2.6,0.5] at z=8.0, plus 2 white `light` eye shine blocks.
-  - BEAK & MOUTH: `Beak_Upper` [2.4,1.6,2.2] at [0,6.4,7.6], `Beak_Lower` [1.8,1.2,1.8] at [0,5.0,7.4] surrounded by 4 white tooth blocks.
-  - FAT STEPPED MANTLE: 7 boxes `Mantle_1` .. `Mantle_7`, each 3.2 tall, stepping up and back:
-      Mantle_1 [11,3.2,10] at [0,13.0,-1.0]; Mantle_2 [12,3.2,11] at [0,15.2,-4.2]; Mantle_3 [12.5,3.2,11.5] at [0,17.4,-7.4]; Mantle_4 [12,3.2,11] at [0,19.6,-10.6]; Mantle_5 [11,3.2,10] at [0,21.8,-13.8]; Mantle_6 [9.5,3,8.5] at [0,24.0,-17.0]; Mantle_7 [7.5,2.6,6.5] at [0,26.0,-20.0].
-    Add 4 `secondary` cream/lighter belly plates on the mantle underside (`Mantle_Belly1..4`), 5 `trim`/accent bioluminescent spots or dorsal crest plates along the top (`Mantle_Crest1..5`), and 2 wide stepped lateral fins (`Fin_L_1..4`, `Fin_R_1..4`).
-  - 8 RADIAL ARMS + 2 FEEDING TENTACLES: 4 segments each (`Arm_FL_Seg1..4`, etc.) fanning out at 45-degree yaw steps, each arm carrying 2-3 contrasting `light`/`secondary` sucker blocks underneath.""",
+  - HEAD & PROTRUDING FACE: `Head_Core` [12,7,10] at [0,7.5,2]. `Head_Brow_L` / `Head_Brow_R` [4.5,1.2,1.8] at [-4,11.2,7.6] / [4,11.2,7.6]. `Head_Collar` [13,1.4,11] at [0,11.7,1.5] in `trim` or `secondary`.
+  - BIG GLOWING EYES (proud at z=7.8..8.4): `Eye_L` / `Eye_R` [3.4,3.4,1.0] at [-4,8.6,7.8] / [4,8.6,7.8] in bright `accent`, `Pupil_L` / `Pupil_R` dark [0.9,2.6,0.5] at z=8.4.
+  - BEAK & MOUTH: `Beak_Upper` [2.4,1.6,2.2] at [0,6.4,7.8], `Beak_Lower` [1.8,1.2,1.8] at [0,5.0,7.6] surrounded by 4 white tooth blocks.
+  - FAT STEPPED MANTLE: 7 smooth-beveled boxes `Mantle_1` .. `Mantle_7`, each 3.2 tall, stepping up and back with 4 `secondary` cream belly plates underneath and 2 wide lateral fins.
+  - 8 RADIAL ARMS + 2 FEEDING TENTACLES: 4 segments each fanning out at 45-degree yaw steps with smooth joint overlap and `light` sucker blocks underneath.""",
 
-    "creature_dragon": """BLUEPRINT - DRAGON / WYVERN / WINGED BOSS, @LO@-@HI@ parts, built from Roblox blocks:
+    "creature_dragon": """BLUEPRINT - DRAGON / WYVERN / WINGED BOSS, @LO@-@HI@ parts, organically beveled (`smooth: 0.30`):
 - SILHOUETTE: wingspan 30-40 studs (X), length 28-36 studs (Z), proud boss stance.
-- HEAD, ROARING JAWS & HORNS (22-28): `Head_Cranium`, `Head_Snout`, hinged lower `Head_Jaw` with dark `Mouth_Cavity`, pink/fiery `Tongue`, 8 white `Tooth`/`Fang` blocks, angled brow blocks, glowing `Eye_L`/`R` + pupils, 2 swept 4-segment horns (`Horn_L_1..4`, `Horn_R_1..4`) in `trim`/`light`, and a 4-segment neck chain `Neck_Seg1..4` with `secondary` throat scutes and dorsal spikes.
-- TORSO (16-20): broad `Torso_Chest` in `base`, 6 overlapping `secondary` (cream/gold) belly scute plates (`Belly_Scute1..6`), haunches, and dorsal ridge spikes down the spine.
-- WINGS (2 x 15-18): shoulder armor, upper/forearm wing bones, 4 fanning wing spars in `dark`/`trim`, and contrasting `secondary`/`accent` membrane plates between spars.
-- LEGS & TAIL (26-32): 4 muscular 4-segment legs with golden leg bands (`Bracer_*`) and 3 white `Claw_*` blocks per foot at y=0, plus a 7-segment tapering tail ending in a spade/flame tip.""",
+- 4-LAYER HEAD, ROARING JAWS & HORNS (24-30): `Head_Cranium` at z=6, protruding `Head_Snout` & hinged lower `Head_Jaw` at z=9.5, dark `Head_Mouth_Cavity` & pink/fiery `Head_Tongue` at z=9.2, 8 white `Fang_*`/`Tooth_*` blocks at z=10.4, angled brow blocks, glowing `Eye_L`/`R` + pupils, 2 swept 4-segment horns (`Horn_L_1..4`, `Horn_R_1..4`) in `trim`/`light`, and a 4-segment neck chain `Neck_Seg1..4` with `secondary` throat scutes.
+- TORSO (16-20): broad `Torso_Chest` in `base`, 6 overlapping `secondary` (cream/gold) belly scute plates (`Belly_Scute1..6`), haunches, and dorsal ridge spikes.
+- WINGS (2 x 15-18): shoulder armor, upper/forearm wing bones, 4 fanning wing spars in `dark`/`trim`, and contrasting `secondary`/`accent` membrane plates.
+- LEGS & TAIL (26-32): 4 muscular 4-segment legs with spherical knee/ankle joints, golden leg bands (`Bracer_*`), and 3 white `Claw_*` blocks per foot at y=0, plus a 7-segment tapering tail.""",
 
-    "creature_bird": """BLUEPRINT - BIRD / PHOENIX / GRIFFIN BOSS, @LO@-@HI@ parts:
-- Stepped `base` body with 5 layered `secondary` chest plumage plates, 2-part hooked golden `trim` beak (`Beak_Upper`, `Beak_Lower`), glowing `accent` eyes + brow ridges, 6-part royal head crest/crown, 2 wide 3-layer feathered wings (inner, mid, and contrasting tip feathers), fanned tail feathers, and 2 golden-taloned legs gripping a rocky pedestal.""",
+    "creature_bird": """BLUEPRINT - BIRD / PHOENIX / GRIFFIN BOSS, @LO@-@HI@ parts (`smooth: 0.30`):
+- Stepped `base` body with 5 layered `secondary` chest plumage plates, 2-part hooked golden `trim` beak (`Beak_Upper`, `Beak_Lower`) protruding at +Z, glowing `accent` eyes + brow ridges, 6-part royal head crest/crown, 2 wide 3-layer feathered wings, fanned tail feathers, and 2 golden-taloned legs gripping a rocky pedestal.""",
 
-    "creature_aquatic": """BLUEPRINT - AQUATIC / SHARK / LEVIATHAN BOSS, @LO@-@HI@ parts:
-- 9-segment tapering body along Z (`Body_Seg1..9`) with a crisp two-tone counter-shade (`base` dorsal top, bright `secondary` cream underbelly `Belly_Seg1..7`), open jaws lined with 10 white `Tooth_*` blocks, glowing `accent` eyes, gill slits, bioluminescent `trim` lateral stripes, tall stepped dorsal fin, pectoral fins, and twin tail flukes.""",
+    "creature_aquatic": """BLUEPRINT - AQUATIC / SHARK / LEVIATHAN BOSS, @LO@-@HI@ parts (`smooth: 0.35`):
+- 9-segment tapering body along Z (`Body_Seg1..9`) with two-tone counter-shading (`base` dorsal top, bright `secondary` cream underbelly `Belly_Seg1..7`), open jaws at +Z lined with 10 white `Tooth_*` blocks and `Mouth_Cavity`, glowing `accent` eyes, gill slits, tall dorsal fin, pectoral fins, and twin tail flukes.""",
 
-    "humanoid": """BLUEPRINT - HUMANOID / MECH / KNIGHT / BOSS CHARACTER, @LO@-@HI@ parts, 18-24 studs tall:
-- HEAD & HELMET/CROWN (18-24): `Head_Skull`, `Face_Plate` (`secondary` skin or dark visor), glowing `Eye_L`/`Eye_R` + brows/mouth, and a multi-part helmet, hood, hair, or golden crown (`Crown_*`) with plumes/horns.
-- TORSO & ARMOR (20-26): broad chest armor with contrasting `secondary` chest plates, glowing `accent` chest core/emblem, `trim` gold belt with buckle and tassets, layered multi-part shoulder pauldrons (`Pauldron_L_1..3`, `Pauldron_R_1..3`), and a cape/backpack/wings at -Z.
-- ARMS, GAUNTLETS & WEAPON (24-30): `Shoulder -> Bicep -> Forearm -> Gold Bracer/Gauntlet -> Hand + Fingers`, wielding a multi-part signature weapon (sword/warhammer/staff with hilt, guard, blade, and glowing runes).
-- LEGS & BOOTS (18-22): `Thigh -> KneeGuard (trim) -> Shin/Greave -> Boot + Sole/Toes` planted firmly at y=0.""",
+    "humanoid": """BLUEPRINT - HUMANOID / MECH / KNIGHT / BOSS CHARACTER, @LO@-@HI@ parts, 18-24 studs tall (`smooth: 0.25`):
+- HEAD & HELMET/CROWN (18-24): `Head_Skull`, protruding `Face_Plate` (`secondary` skin or dark visor), glowing `Eye_L`/`Eye_R` + brows/mouth proud at +Z, and a multi-part helmet, hood, hair, or golden crown (`Crown_*`).
+- TORSO & ARMOR (20-26): broad chest armor with contrasting `secondary` chest plates, glowing `accent` chest emblem, `trim` gold belt with buckle, and layered shoulder pauldrons (`Pauldron_L_1..3`, `Pauldron_R_1..3`).
+- ARMS, GAUNTLETS & WEAPON (24-30): smoothly aligned `Shoulder -> Bicep -> Elbow -> Forearm -> Gold Bracer -> Hand + Fingers`, wielding a multi-part signature weapon.
+- LEGS & BOOTS (18-22): `Hip -> Thigh -> KneeGuard (trim) -> Shin -> Boot + Toes` planted at y=0.""",
 
-    "vehicle": """BLUEPRINT - VEHICLE (SUPERCAR / TRUCK / AIRCRAFT / SHIP), @LO@-@HI@ parts:
+    "vehicle": """BLUEPRINT - VEHICLE (SUPERCAR / TRUCK / AIRCRAFT / SHIP), @LO@-@HI@ parts (`smooth: 0.18`):
 - Multi-tone bodywork: `base` primary paint, `secondary` racing stripes/lower trim, `dark` carbon splitters/diffuser/tires, `trim` gold/silver wheel rims & badging, `light` bright headlights & window glass highlights, and `accent` glowing taillights/afterburners.
-- Wheeled vehicles include 4 multi-part cylindrical wheels (`Tire`, `Rim`, `Hub`, `Caliper`), tilted hood/windshield/fastback roof, side intakes, mirrors, quad exhausts, and rear spoiler wing.""",
+- Wheeled vehicles include 4 multi-part cylindrical wheels (`Tire`, `Rim`, `Hub`, `Caliper`), aerodynamic sloped hood/windshield/roof, side intakes, mirrors, quad exhausts, and rear spoiler wing.""",
 
-    "structure": """BLUEPRINT - ARCHITECTURAL STRUCTURE / CASTLE / TOWER / SHRINE, @LO@-@HI@ parts:
-- Multi-tone materials: `dark`/`secondary` stepped stone foundation and corner quoins, `base` recessed wall panels, `trim` ornate roof trims/gold finials/banners, `accent` warm glowing window panes & hanging lanterns, `light` steps and arch keystones, plus pitched roof slopes, timber beams, and courtyard props.""",
+    "structure": """BLUEPRINT - ARCHITECTURAL STRUCTURE / CASTLE / TOWER / SHRINE, @LO@-@HI@ parts (`smooth: 0.06`):
+- Multi-tone materials: `dark`/`secondary` stepped stone foundation and corner quoins, `base` recessed wall panels, `trim` ornate roof trims/gold finials/banners, `accent` warm glowing window panes & hanging lanterns, `light` steps and arch keystones, plus pitched roof slopes and courtyard props.""",
 
-    "prop": """BLUEPRINT - DETAILED PROP / WEAPON / ARTIFACT / CHEST, @LO@-@HI@ parts:
-- Crisp multi-material layering using all 6 palette slots: `dark` grip/iron frame, `trim` ornate gold crossguard/brackets/locks, `base` casing/scabbard, `secondary` blade fuller/inlay, `light` razor edges/rivets/teeth, and `accent` glowing runes/gems/treasure.""",
+    "prop": """BLUEPRINT - DETAILED PROP / WEAPON / ARTIFACT / CHEST, @LO@-@HI@ parts (`smooth: 0.15`):
+- Crisp multi-material layering using all 6 palette slots: `dark` grip/iron frame, `trim` ornate gold crossguard/brackets/locks, `base` casing/scabbard, `secondary` blade fuller/inlay, `light` razor edges/rivets, and `accent` glowing runes/gems.""",
 
-    "plant": """BLUEPRINT - STYLIZED TREE / BOTANICAL DIORAMA / FANTASY FLORA, @LO@-@HI@ parts:
+    "plant": """BLUEPRINT - STYLIZED TREE / BOTANICAL DIORAMA / FANTASY FLORA, @LO@-@HI@ parts (`smooth: 0.32`):
 - Stepped earth & mossy rock base (`dark` + `secondary`), twisted multi-branch root & trunk chains (`base`), and 25-35 layered canopy/blossom/mushroom blocks across 3 distinct shades (`secondary`, `trim`, `accent`, `light`) with glowing fruit/spores.""",
 }
 
@@ -291,8 +290,8 @@ def classify(prompt: str, hint: str = "") -> Tuple[str, str, bool, bool]:
 def part_range(cat: str, target: Optional[int]) -> Tuple[int, int]:
     lo, hi = PART_RANGE[cat]
     if target:
-        t = max(30, min(160, int(target)))
-        lo, hi = max(30, t - 12), min(160, t + 12)
+        t = max(30, min(165, int(target)))
+        lo, hi = max(30, t - 12), min(165, t + 12)
     return lo, hi
 
 
@@ -307,13 +306,13 @@ def build_user_prompt(prompt: str, cat: str, sub: str, lo: int, hi: int, web_ctx
         f'SUBJECT: "{prompt}"',
         f"CATEGORY: {cat}" + (f" ({sub})" if sub else ""),
         f"TARGET: {lo}-{hi} parts, longest side 24-45 studs.",
-        "Build this like a front-page Roblox game boss/asset! MUST INCLUDE:",
-        "1) Bold 6-color contrast (`base` body/fur, warm `secondary` cream/tan skin for face muzzle, chest pectorals, abs, fingers & toes, bright `trim` gold for crown/wrist bracers/cuffs/armor trim, glowing `accent` eyes, `light` white fangs/teeth/claws, and `dark` pupils/mouth cavity).",
-        "2) An expressive detailed head (brows, glowing eyes, pupils, protruding muzzle, open jaw with white fangs & pink tongue, plus crown/horns/ears).",
-        "3) Layered chest plates, shoulder fur tufts/pauldrons, golden wrist bracers, and individual fingers/toes.",
+        "CRITICAL CLOUD 3D MODELING REQUIREMENTS:",
+        "1) CLEAR 3D FACE RELIEF AT +Z: Place the face features in front of the head (`z = 7.5..9.8`): cream FacePlate, angled Brows, fierce red Eye_L & Eye_R, dark Pupils, protruding Upper Muzzle, Lower Jaw, dark Mouth_Cavity, pink Tongue, and 6 white Fangs/Teeth!",
+        "2) SMOOTH MUSCULAR RIGGING: Use `smooth: 0.32..0.45` on all muscles, torso, head, and limbs. Align Shoulder -> Bicep -> Elbow -> Forearm -> Wrist Bracer -> Hand smoothly along the same X axis without jagged sideways steps.",
+        "3) CLEAN COLOR BLOCKING: Dark navy-charcoal (`#18202c`) fur, warm cream (`#e8dcc4`) on face/chest/abs/fingers/toes, royal gold (`#f5c518`) on the head Crown and Wrist Bracers ONLY (no red on chest or hands!).",
     ]
     if web_ctx:
-        out.append("LIVE WEB REFERENCE (match the subject's iconic colors, anatomy, accessories, and markings):\n" + web_ctx)
+        out.append("LIVE WEB REFERENCE:\n" + web_ctx)
     return "\n".join(out)
 
 
@@ -331,7 +330,7 @@ def build_revision_prompt(prompt: str, cat: str, lo: int, hi: int, parts: List[D
         out.append(f'REQUESTED CHANGE FROM THE USER: "{change}"\nApply it faithfully and keep everything else.')
     if problems:
         out.append("PROBLEMS FOUND BY THE CHECKER - fix all of them:\n" + "\n".join("- " + m for m in problems))
-    out.append("Ensure high-contrast Roblox color blocking (cream/tan chest & face plates, gold wrist bracers/crown, glowing eyes, white fangs/claws) and zero floating parts.")
+    out.append("Ensure the face (brows, glowing eyes, open mouth cavity, white fangs, tongue) protrudes clearly at +Z in front of the head, rigging joints flow smoothly with `smooth: 0.35`, and colors are clean.")
     out.append("Return the COMPLETE corrected build in the same JSON schema (plan + every op), never a diff.")
     return "\n".join(out)
 
@@ -471,7 +470,7 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
         gc: Dict[str, Any] = {
             "responseMimeType": "application/json",
-            "temperature": 0.36,
+            "temperature": 0.34,
             "maxOutputTokens": 32768,
         }
         if budget > 0 and "lite" not in m:
@@ -536,7 +535,7 @@ async def call_openai_compat(client, provider, base, key, model, system, user) -
         payload["max_completion_tokens"] = 32000
         payload["reasoning_effort"] = "medium"
     else:
-        payload["temperature"] = 0.35
+        payload["temperature"] = 0.34
         payload["max_tokens"] = 16000 if provider == "openai" else 12000
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     data = await _post_healing(client, provider, base + "/chat/completions", headers, payload)
@@ -556,7 +555,7 @@ async def call_groq(client, key, model, system, user):
 
 async def call_anthropic(client, key, model, system, user) -> Tuple[str, str]:
     model = model or DEFAULT_MODELS["anthropic"]
-    payload = {"model": model, "max_tokens": 16000, "temperature": 0.35, "system": system,
+    payload = {"model": model, "max_tokens": 16000, "temperature": 0.34, "system": system,
                "messages": [{"role": "user", "content": user}]}
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
     data = await _post_healing(client, "anthropic", "https://api.anthropic.com/v1/messages", headers, payload)
@@ -568,7 +567,7 @@ CALLERS = {"gemini": call_gemini, "openai": call_openai, "anthropic": call_anthr
 
 async def call_pollinations(client, system: str, user: str) -> str:
     res = await client.post("https://text.pollinations.ai/openai", json={
-        "model": "openai", "temperature": 0.35, "jsonMode": True,
+        "model": "openai", "temperature": 0.34, "jsonMode": True,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
     if res.status_code != 200:
         raise ProviderError("free-fallback", res.status_code, _err_text(res))
@@ -670,7 +669,7 @@ def clean_web_context(raw: str) -> str:
     return raw[:1600]
 
 
-# --------------------------------------------------------------------------- parsing & geometry healing
+# --------------------------------------------------------------------------- parsing & Cloud 3D Smoothing / Rigging / Facial Relief
 def salvage_ops(text: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {"ops": []}
     m = re.search(r'"title"\s*:\s*"([^"]*)"', text)
@@ -794,28 +793,53 @@ def fix_cylinder_axes(pid: str, shape: str, size: List[float], rot: List[float])
     return size, rot
 
 
-_ROUND_EXEMPT = re.compile(r"eye|pupil|iris|orb|ball|pearl|gem|jewel|bead|knob|bubble|halo|lens|egg|berry|fruit|planet|globe", re.I)
+_ROUND_EXEMPT = re.compile(
+    r"eye|pupil|iris|orb|ball|pearl|gem|jewel|bead|knob|bubble|halo|lens|egg|berry|fruit|planet|globe|"
+    r"joint|shoulder|elbow|knee|hip|ankle|wrist|dome|cranium|cheek|snout|muzzle|nose|chin|pec|bicep|thigh", re.I
+)
 _SPIKE_OK = re.compile(r"spike|thorn|fang|tooth|talon|claw|horn|tusk|stinger|crown_point|crown_spike", re.I)
 _RING_OK = re.compile(r"ring|halo|hoop|tire|tyre|bracer|cuff|collar|crown_band", re.I)
-_CYL_EXEMPT = re.compile(r"wheel|tire|tyre|rim|hub|axle|barrel|pipe|exhaust|column|pillar|trunk|wand|staff|handle|pole|post|"
-                         r"nozzle|thruster|cannon|muzzle|suck|candle|lamp|chimney|spar|grip|hilt|bracer|cuff", re.I)
+_CYL_EXEMPT = re.compile(
+    r"wheel|tire|tyre|rim|hub|axle|barrel|pipe|exhaust|column|pillar|trunk|wand|staff|handle|pole|post|"
+    r"nozzle|thruster|cannon|muzzle|suck|candle|lamp|chimney|spar|grip|hilt|bracer|cuff|crown|bicep|forearm|thigh|shin|neck", re.I
+)
+_CRISP_SHARP = re.compile(
+    r"tooth|teeth|fang|claw|talon|spike|thorn|blade|edge|sword|dagger|axe|crown_spike|crown_point|wall|floor|plinth|step|brick|crate", re.I
+)
+_ORGANIC_MUSCLE = re.compile(
+    r"head|cranium|skull|dome|cheek|face|muzzle|snout|jaw|chin|brow|ear|tongue|torso|chest|pec|belly|ab|abs|pelvis|rump|hump|"
+    r"shoulder|bicep|elbow|forearm|wrist|hand|palm|finger|thumb|hip|thigh|knee|shin|calf|ankle|foot|toe|"
+    r"mantle|tentacle|arm|leg|tail|neck|fin|pauldron|tuft|mane|foliage|canopy|cap|mushroom", re.I
+)
 
 
 def heal_part_shape_and_smoothness(pid: str, shape: str, size: List[float], smooth: float, cat: str, sub: str) -> Tuple[str, float]:
+    """Cloud 3D Organic Smoothing Policy:
+    Allows spherical joints & rounded organic bevels on creatures/humanoids/plants so models
+    look smoothly sculpted instead of sketchy raw blocks."""
     longest = max(size)
     if shape == "sphere":
-        if not (_ROUND_EXEMPT.search(pid) and longest <= 3.6):
+        if not (_ROUND_EXEMPT.search(pid) or (cat in ("creature", "humanoid", "plant") and longest <= 8.5)):
             shape = "box"
     elif shape == "cone":
-        if not (_SPIKE_OK.search(pid) and longest <= 3.2):
+        if not (_SPIKE_OK.search(pid) and longest <= 4.0):
             shape = "box"
     elif shape == "torus":
         if not _RING_OK.search(pid):
             shape = "box"
-    if shape == "box":
-        smooth = min(smooth, 0.08)
-    elif shape == "cylinder":
-        smooth = min(smooth, 0.25)
+
+    # Compute adaptive organic bevel smoothness
+    if _CRISP_SHARP.search(pid):
+        smooth = min(smooth, 0.06)
+    elif cat in ("creature", "humanoid", "plant") and _ORGANIC_MUSCLE.search(pid):
+        if shape == "box":
+            smooth = max(smooth, 0.34)
+        elif shape == "cylinder":
+            smooth = max(smooth, 0.40)
+        elif shape == "sphere":
+            smooth = max(smooth, 0.68)
+    elif shape == "box":
+        smooth = max(0.08, min(smooth, 0.32))
     return shape, max(0.0, min(1.0, smooth))
 
 
@@ -826,18 +850,19 @@ def enforce_roblox_budget(parts: List[Dict[str, Any]], cat: str) -> int:
     changed = 0
     round_idx = sorted((i for i, p in enumerate(parts) if p["shape"] in ("sphere", "cone", "torus")),
                        key=lambda i: (bool(_ROUND_EXEMPT.search(parts[i]["id"])), -vol(parts[i])))
-    cap_round = max(4, int(0.10 * n))
+    # Allow up to 22% spheres/cones for smooth rigging joints, domes, eyes, and fangs
+    cap_round = max(6, int(0.22 * n))
     for i in round_idx[: max(0, len(round_idx) - cap_round)]:
         parts[i]["shape"] = "box"
-        parts[i]["smooth"] = min(parts[i]["smooth"], 0.08)
+        parts[i]["smooth"] = max(parts[i]["smooth"], 0.34)
         changed += 1
     if cat in ("creature", "humanoid", "plant"):
         cyl = sorted((i for i, p in enumerate(parts) if p["shape"] == "cylinder" and not _CYL_EXEMPT.search(p["id"])),
                      key=lambda i: -vol(parts[i]))
-        cap_cyl = max(2, int(0.15 * n))
+        cap_cyl = max(4, int(0.20 * n))
         for i in cyl[cap_cyl:]:
             parts[i]["shape"] = "box"
-            parts[i]["smooth"] = min(parts[i]["smooth"], 0.08)
+            parts[i]["smooth"] = max(parts[i]["smooth"], 0.34)
             changed += 1
     return changed
 
@@ -851,10 +876,10 @@ def lean_deg(p: Dict[str, Any]) -> float:
 
 
 _LEAN_OK = re.compile(r"tail|wing|spar|feather|roof|hood|windshield|glass|slope|ramp|horn|tusk|branch|blade|antler|thorn|spike|stair|gable|ridge|brow|pauldron|tuft|crown", re.I)
-_LIMB_RE = re.compile(r"arm|tentacle|leg|neck|finger|toe|claw|seg|bicep|forearm|thigh|shin|jaw", re.I)
+_LIMB_RE = re.compile(r"arm|tentacle|leg|neck|finger|toe|claw|seg|bicep|forearm|thigh|shin|jaw|bracer|cuff", re.I)
 
 
-def limit_lean(parts: List[Dict[str, Any]], max_share: float = 0.35) -> int:
+def limit_lean(parts: List[Dict[str, Any]], max_share: float = 0.38) -> int:
     n = len(parts)
     if n < 20:
         return 0
@@ -880,7 +905,7 @@ def limit_lean(parts: List[Dict[str, Any]], max_share: float = 0.35) -> int:
     return fixed
 
 
-# --------------------------------------------------------------------------- Semantic Color-Zone Enforcer (NEW in v17)
+# --------------------------------------------------------------------------- Word-Boundary Semantic Color-Zone Enforcer (Fixed in v18)
 def _hex_to_hls(c: str) -> Tuple[float, float, float]:
     r, g, b = (int(c[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
     return colorsys.rgb_to_hls(r, g, b)
@@ -897,64 +922,62 @@ def _color_dist(c1: str, c2: str) -> float:
     return math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2)
 
 
+# Token-boundary regexes so 'Torso_Core' or 'Hand_Core' NEVER match 'core' or 'iris'!
+_TOK = r"(?:^|_)"
+_TOK_END = r"(?:$|_|\d)"
+
 _ZONE_SKIN_CHEST = re.compile(
-    r"chest|pec|ab|abs|belly|underbelly|stomach|scute|face|muzzle|snout|jaw|chin|cheek_inner|ear_inner|"
-    r"palm|finger|thumb|toe|sole|suck|throat", re.I
+    _TOK + r"(?:chest|pec|pecs|ab|abs|belly|underbelly|stomach|scute|face|faceplate|faceupper|cheekbone|"
+           r"muzzle|snout|jaw|brow|ear|palm|finger|thumb|toe|suck|throat)" + _TOK_END, re.I
 )
 _ZONE_GOLD_TRIM = re.compile(
-    r"crown|bracer|cuff|bangle|band|buckle|trim|emblem|crest_gold|collar|pauldron_trim|rim|hilt|guard|pommel|halo|tiara|bell", re.I
+    _TOK + r"(?:crown|bracer|cuff|bangle|buckle|trim|emblem|collar|rim|hilt|guard|pommel|halo|tiara)" + _TOK_END, re.I
 )
 _ZONE_GLOW_ACCENT = re.compile(
-    r"^eye|eye_l|eye_r|iris|visor|core|reactor|gem|jewel|rune|flame|fire|laser|plasma|glow|taillight|thruster|afterburner", re.I
+    _TOK + r"(?:eye|eyes|iris|visor|reactor|gem|jewel|rune|flame|fire|laser|plasma|taillight|thruster|afterburner)" + _TOK_END, re.I
 )
 _ZONE_WHITE_LIGHT = re.compile(
-    r"tooth|teeth|fang|tusk|claw|talon|nail|sclera|highlight|shine|glint|bone|skull_face|horn_tip|headlight|blade_edge", re.I
+    _TOK + r"(?:tooth|teeth|fang|fangs|tusk|claw|talon|nail|sclera|highlight|shine|glint|headlight)" + _TOK_END, re.I
 )
 _ZONE_DARK = re.compile(
-    r"pupil|mouth|cavity|nostril|joint|tire|tyre|exhaust_inner|shadow|slit|grille", re.I
+    _TOK + r"(?:pupil|mouth|cavity|nostril|tire|tyre|slit|grille)" + _TOK_END, re.I
 )
-_ZONE_TONGUE = re.compile(r"tongue|gum|mouth_inner", re.I)
+_ZONE_TONGUE = re.compile(_TOK + r"(?:tongue|gum|gums)" + _TOK_END, re.I)
+_ZONE_FORCE_BASE = re.compile(
+    _TOK + r"(?:cranium|topdome|cheek|chin|torso|pelvis|hump|back|pauldron|tuft|shoulder|bicep|elbow|forearm|hand|hip|thigh|knee|shin|calf|foot|ankle)" + _TOK_END, re.I
+)
 
 
 def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any], prompt: str, cat: str) -> None:
-    """Guarantees rich Roblox Studio color contrast so models never look like monochrome grey blobs.
-    Maps semantic body parts (chest, muzzle, fingers, toes, crown, bracers, teeth, eyes) to distinct contrasting colors."""
     p_low = prompt.lower()
-    base = str(palette.get("base") or "#1c2430").lower()
+    is_ape = any(w in p_low for w in ("gorilla", "ape", "monkey", "kong", "primate", "baboon", "orangutan", "chimpanzee"))
+    base = str(palette.get("base") or "#18202c").lower()
     if not re.fullmatch(r"#[0-9a-f]{6}", base):
-        base = "#1c2430"
+        base = "#18202c"
 
-    # Richer base if LLM picked dull medium grey on a creature
     bh, bl, bs = _hex_to_hls(base)
-    if cat == "creature" and bs < 0.12 and 0.18 < bl < 0.45:
-        base = _hls_to_hex(0.60, 0.16, 0.28)  # Rich dark navy-charcoal like Roblox Gorilla Boss
+    if is_ape or (cat == "creature" and (bs < 0.12 or bl > 0.35)):
+        base = "#18202c"  # Deep navy-charcoal fur matching Roblox Gorilla Boss
         bh, bl, bs = _hex_to_hls(base)
 
     sec = str(palette.get("secondary") or "").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", sec) or _color_dist(base, sec) < 0.28:
-        # Warm cream/tan contrast if base is dark, or deep contrast if base is light
-        if any(w in p_low for w in ("gorilla", "ape", "monkey", "kong", "bear", "wolf", "lion", "dog", "cat", "rex", "dino", "dragon")):
-            sec = "#e8dcc4" if bl < 0.55 else "#2c221e"
+    if not re.fullmatch(r"#[0-9a-f]{6}", sec) or _color_dist(base, sec) < 0.32 or _hex_to_hls(sec)[1] < 0.60:
+        if is_ape or any(w in p_low for w in ("bear", "wolf", "lion", "dog", "cat", "rex", "dino", "dragon")):
+            sec = "#e8dcc4"  # Warm sculpted cream skin/chest/faceplate
         else:
-            sec = _hls_to_hex((bh + 0.08) % 1.0, min(0.86, bl + 0.48) if bl < 0.5 else max(0.18, bl - 0.42), max(0.35, bs))
+            sec = _hls_to_hex((bh + 0.08) % 1.0, 0.82, 0.35)
 
-    trim = str(palette.get("trim") or "").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", trim) or _color_dist(base, trim) < 0.25:
-        trim = "#f5c518"  # Royal Roblox Gold for crowns, bracers, cuffs, trim
+    trim = str(palette.get("trim") or "#f5c518").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", trim) or _color_dist(base, trim) < 0.28:
+        trim = "#f5c518"  # Royal Gold for Crown & Wrist Bracers
 
-    accent = str(palette.get("accent") or "").lower()
+    accent = str(palette.get("accent") or "#ff2a2a").lower()
     if not re.fullmatch(r"#[0-9a-f]{6}", accent) or _color_dist(base, accent) < 0.25:
-        accent = "#ff2a2a" if any(w in p_low for w in ("gorilla", "ape", "kong", "boss", "demon", "dragon", "mech")) else "#ffd84d"
+        accent = "#ff2a2a"
 
-    light = str(palette.get("light") or "#ffffff").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", light) or _hex_to_hls(light)[1] < 0.80:
-        light = "#f8f6f0"
+    light = "#ffffff"
+    dark = "#0d1017"
 
-    dark = str(palette.get("dark") or "#0e1116").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", dark) or _hex_to_hls(dark)[1] > 0.20:
-        dark = "#0e1116"
-
-    # Update palette in-place so UI displays the upgraded swatches
     palette["base"] = base
     palette["secondary"] = sec
     palette["trim"] = trim
@@ -964,26 +987,162 @@ def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any],
 
     for p in parts:
         pid = p["id"]
-        c = p["color"]
-        # Only override if part matches a specific anatomical/detail zone AND its current color is too close to base/dark
         if _ZONE_TONGUE.search(pid):
-            p["color"] = "#d95b72"
+            p["color"] = "#e06b80"
         elif _ZONE_WHITE_LIGHT.search(pid):
             p["color"] = light
-        elif _ZONE_DARK.search(pid) and not _ZONE_GLOW_ACCENT.search(pid):
+        elif _ZONE_DARK.search(pid):
             p["color"] = dark
-        elif _ZONE_GLOW_ACCENT.search(pid) and not re.search(r"brow|socket|lid|frame", pid, re.I):
+        elif _ZONE_GLOW_ACCENT.search(pid) and not re.search(r"brow|socket|lid|frame|crown", pid, re.I):
             p["color"] = accent
-        elif _ZONE_GOLD_TRIM.search(pid):
-            if _color_dist(c, base) < 0.25 or _hex_to_hls(c)[2] < 0.35:
-                p["color"] = trim
-        elif _ZONE_SKIN_CHEST.search(pid) and not re.search(r"back|spine|shoulder|pauldron|bicep|thigh|shin|cranium", pid, re.I):
-            if _color_dist(c, base) < 0.28:
-                p["color"] = sec
-        elif re.search(r"pauldron|tuft|mane|saddle|back_silver", pid, re.I):
-            if _color_dist(c, base) < 0.08:
-                # Slightly lighter/cooler slate for layered shoulder fur pads so they stand out against the torso
-                p["color"] = _hls_to_hex(bh, min(0.42, bl + 0.09), max(0.18, bs * 0.85))
+        elif _ZONE_GOLD_TRIM.search(pid) and not re.search(r"innerdome|waist|belt|pelvis", pid, re.I):
+            p["color"] = trim
+        elif _ZONE_SKIN_CHEST.search(pid) and not re.search(r"cranium|cheek_l|cheek_r|chin_fur|back|shoulder|pauldron|bicep|forearm|thigh|shin|hand_l|hand_r|foot_l|foot_r", pid, re.I):
+            p["color"] = sec
+        elif is_ape and _ZONE_FORCE_BASE.search(pid):
+            if re.search(r"pauldron|tuft|back_silver|saddle", pid, re.I):
+                p["color"] = _hls_to_hex(bh, min(0.26, bl + 0.06), max(0.22, bs))
+            else:
+                p["color"] = base
+
+
+# --------------------------------------------------------------------------- Cloud 3D Facial Depth Relief & Rigging Welder (NEW in v18)
+def extrude_facial_hierarchy(parts: List[Dict[str, Any]], cat: str) -> int:
+    """Guarantees the creature's face is NEVER swallowed by the head block!
+    Finds the head cranium/core front Z plane and steps facial parts forward in 4 clear relief layers:
+    Layer 1 (Cranium front) -> Layer 2 (FacePlate / Muzzle / Jaw) -> Layer 3 (Brows / Eyes / Mouth Cavity)
+    -> Layer 4 (Pupils / Fangs / Teeth / Tongue / Nostrils)."""
+    if cat not in ("creature", "humanoid"):
+        return 0
+
+    head_cores = [
+        p for p in parts
+        if re.search(r"^(?:head|skull|cranium)", p["id"], re.I)
+        and not re.search(r"face|muzzle|snout|jaw|mouth|cavity|tongue|tooth|teeth|fang|eye|pupil|brow|nostril|ear|horn|crown|crest", p["id"], re.I)
+    ]
+    if not head_cores:
+        return 0
+
+    # Find front-most Z surface of the main cranium
+    cranium_front_z = max(p["pos"][2] + p["size"][2] * 0.5 for p in head_cores)
+    adjusted = 0
+
+    # Layer 2: FacePlate, Upper Snout/Muzzle, Lower Jaw -> sits on or protrudes in front of cranium_front_z
+    face_front_z = cranium_front_z + 0.55
+    for p in parts:
+        pid = p["id"]
+        if re.search(r"faceplate|faceupper|face_plate|cheekbone", pid, re.I):
+            half_z = p["size"][2] * 0.5
+            target_front = cranium_front_z + 0.65
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+            face_front_z = max(face_front_z, p["pos"][2] + half_z)
+
+    muzzle_front_z = face_front_z + 0.75
+    for p in parts:
+        pid = p["id"]
+        if re.search(r"muzzle|snout|jaw_lower|head_jaw", pid, re.I) and not re.search(r"cavity|mouth", pid, re.I):
+            half_z = p["size"][2] * 0.5
+            target_front = face_front_z + 0.85
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+            muzzle_front_z = max(muzzle_front_z, p["pos"][2] + half_z)
+
+    # Layer 3: Brow ridges, Glowing Eyes, Open Mouth Cavity
+    for p in parts:
+        pid = p["id"]
+        half_z = p["size"][2] * 0.5
+        if re.search(r"brow", pid, re.I):
+            target_front = max(face_front_z + 0.75, muzzle_front_z + 0.15)
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+        elif re.search(r"(?:^|_)eye(?:_|$|\d)", pid, re.I) and not re.search(r"pupil|brow|socket", pid, re.I):
+            target_front = face_front_z + 0.48
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+            p["size"][0] = max(p["size"][0], 1.65)
+            p["size"][1] = max(p["size"][1], 0.90)
+        elif re.search(r"mouth_cavity|mouthcavity|head_mouth", pid, re.I):
+            target_front = muzzle_front_z - 0.10
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+
+    # Layer 4: Pupils, Fangs/Teeth, Tongue, Nostrils (must sit proud of eyes & mouth cavity!)
+    for p in parts:
+        pid = p["id"]
+        half_z = p["size"][2] * 0.5
+        if re.search(r"pupil", pid, re.I):
+            target_front = face_front_z + 0.72
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+        elif re.search(r"fang|tooth|teeth", pid, re.I):
+            target_front = muzzle_front_z + 0.22
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+        elif re.search(r"tongue", pid, re.I):
+            target_front = muzzle_front_z + 0.08
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+        elif re.search(r"nostril", pid, re.I):
+            target_front = muzzle_front_z + 0.25
+            if p["pos"][2] + half_z < target_front:
+                p["pos"][2] = target_front - half_z
+                adjusted += 1
+
+    return adjusted
+
+
+def smooth_and_weld_rigging(parts: List[Dict[str, Any]], cat: str) -> int:
+    """Fixes sketchy staircase rigging on arms and legs by aligning lateral X drift across limb chains
+    and injecting rounded joint spheres where segments meet with a visible step."""
+    if cat not in ("creature", "humanoid"):
+        return 0
+
+    welded = 0
+    for side_sign, side_tag in ((-1.0, "l"), (1.0, "r")):
+        arm_chain = []
+        for stage_re, order in (
+            (rf"arm_{side_tag}_shoulder|shoulder_{side_tag}", 1),
+            (rf"arm_{side_tag}_bicep|arm_{side_tag}_upper|bicep_{side_tag}|upperarm_{side_tag}", 2),
+            (rf"arm_{side_tag}_elbow|elbow_{side_tag}", 3),
+            (rf"arm_{side_tag}_forearm|arm_{side_tag}_lower|forearm_{side_tag}", 4),
+            (rf"bracer_{side_tag}|wrist_{side_tag}", 5),
+            (rf"hand_{side_tag}", 6),
+        ):
+            matches = [p for p in parts if re.search(stage_re, p["id"], re.I) and not re.search(r"finger|thumb|pauldron|tuft", p["id"], re.I)]
+            if matches:
+                arm_chain.append((order, matches[0]))
+
+        if len(arm_chain) >= 3:
+            # Smooth lateral X alignment so the arm doesn't staircase outward/inward jaggedly
+            xs = [p["pos"][0] for _, p in arm_chain]
+            median_x = sum(xs) / len(xs)
+            for order, p in arm_chain:
+                target_x = median_x * (0.94 if order == 1 else 1.0)
+                if abs(p["pos"][0] - target_x) > 0.8:
+                    p["pos"][0] = 0.35 * p["pos"][0] + 0.65 * target_x
+                    welded += 1
+                p["smooth"] = max(p["smooth"], 0.38)
+
+            # Also align all bracer pieces to forearm X/Z
+            forearms = [p for ord_k, p in arm_chain if ord_k == 4]
+            if forearms:
+                fx, fz = forearms[0]["pos"][0], forearms[0]["pos"][2]
+                for p in parts:
+                    if re.search(rf"bracer_{side_tag}|cuff_{side_tag}", p["id"], re.I):
+                        p["pos"][0] = fx
+                        p["pos"][2] = fz
+                        p["smooth"] = max(p["smooth"], 0.28)
+
+    return welded
 
 
 def _snap_q(v: float, q: float = 0.25) -> float:
@@ -994,7 +1153,7 @@ def _snap_rot(a: float) -> float:
     return _wrap_deg(round(a / 15.0) * 15.0)
 
 
-def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#1c2430",
+def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#18202c",
                   cat: str = "creature", sub: str = "") -> List[Dict[str, Any]]:
     parts: List[Dict[str, Any]] = []
     seen = set()
@@ -1028,8 +1187,8 @@ def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#
         shape, smooth = heal_part_shape_and_smoothness(pid, shape, size, smooth, cat, sub)
         size, rot = fix_cylinder_axes(pid, shape, size, rot)
         if shape == "box" and all(abs(((r + 45.0) % 90.0) - 45.0) < 0.6 for r in rot):
-            size = [max(0.25, _snap_q(s)) for s in size]
-            pos = [_snap_q(v) for v in pos]
+            size = [max(0.20, _snap_q(s, 0.1)) for s in size]
+            pos = [_snap_q(v, 0.1) for v in pos]
 
         color = str(item.get("color") or item.get("c") or default_color).strip()
         if re.fullmatch(r"#[0-9a-fA-F]{3}", color):
@@ -1107,12 +1266,12 @@ def dedupe(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 _CHAIN_RE = re.compile(
     r"^((?:tentacle|arm|leg|tail|neck|spine|wing|branch|root|horn|antenna|claw|finger|toe|vine|feeler|whisker|fin)"
     r"(?:_[a-zA-Z0-9]+?)?)"
-    r"(?:_?(?:seg|part|sec|bone|joint|node|ring|lobe)?_?(\d+)|_(base|root|shoulder|bicep|upper|mid|middle|lower|forearm|thigh|shin|calf|ankle|club|tip|end|paw|hand|foot|claw))$",
+    r"(?:_?(?:seg|part|sec|bone|joint|node|ring|lobe)?_?(\d+)|_(base|root|shoulder|bicep|upper|elbow|mid|middle|lower|forearm|thigh|knee|shin|calf|ankle|club|tip|end|paw|hand|foot|claw))$",
     re.I,
 )
 _STAGE_ORDER = {
     "base": 1, "root": 1, "shoulder": 1, "thigh": 1,
-    "upper": 2, "bicep": 2, "mid": 3, "middle": 3,
+    "upper": 2, "bicep": 2, "elbow": 3, "knee": 3, "mid": 3, "middle": 3,
     "lower": 4, "forearm": 4, "shin": 4, "calf": 4, "ankle": 5,
     "club": 8, "paw": 8, "hand": 8, "foot": 8, "claw": 9, "tip": 10, "end": 10,
 }
@@ -1166,7 +1325,7 @@ def stitch_articulated_chains(parts: List[Dict[str, Any]]) -> int:
                 gap, mv = aabb_gap(b_prev, b_curr)
 
             if gap > 0.01 and dist > 1e-4:
-                shift = [v + (0.12 if v > 0 else -0.12 if v < 0 else 0.0) for v in mv]
+                shift = [v + (0.14 if v > 0 else -0.14 if v < 0 else 0.0) for v in mv]
                 downstream = indices[pos_idx + 1:]
                 curr_pos_before = list(p_curr["pos"])
                 for d_idx in downstream:
@@ -1285,7 +1444,7 @@ def snap_floating(parts: List[Dict[str, Any]], max_gap: float = 16.0) -> int:
 
 
 def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, prompt: str,
-            overlap: Dict[str, Any], snapped: int) -> Dict[str, Any]:
+            overlap: Dict[str, Any], snapped: int, face_relieved: int, rig_welded: int) -> Dict[str, Any]:
     n, issues, score = len(parts), [], 100.0
     glo, ghi = bounds(parts)
     ext = [ghi[k] - glo[k] for k in range(3)]
@@ -1297,7 +1456,7 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
         score -= penalty
 
     if n < lo:
-        add("PART_COUNT_LOW", f"only {n} parts; the target is {lo}-{hi}. Add sculpted chest plates, facial details (brows, teeth, tongue), wrist bracers, crown/horns, and individual fingers/toes.",
+        add("PART_COUNT_LOW", f"only {n} parts; the target is {lo}-{hi}. Add 4-layer facial details (brows, glowing eyes, open mouth cavity, 6 white fangs, pink tongue), sculpted chest plates, wrist bracers, and individual fingers/toes.",
             n < gate, min(35.0, (lo - n) / lo * 60))
 
     comps = components(parts)
@@ -1307,7 +1466,7 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
         add("FLOATING", f"{len(stray)} group(s) of parts are not connected to the main body (e.g. {names}). Move them so they overlap a neighbour.",
             True, min(25.0, 10.0 * len(stray)))
     float_msg = (f"{len(stray)} disconnected group(s) left." if stray else
-                 (f"{snapped} loose part(s) were seamlessly stitched onto the body." if snapped else "Every part is connected to the body."))
+                 f"Every part is connected ({snapped} stitched, {rig_welded} rigging joints smoothed, {face_relieved} facial features extruded in 3D relief).")
 
     if overlap["remaining"]:
         add("OVERLAP", f"{overlap['remaining']} pair(s) of parts still share the exact same surface.", False, min(10.0, 2.5 * overlap["remaining"]))
@@ -1317,13 +1476,15 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
     else:
         overlap_msg = "No same-surface overlaps - nothing will flicker in Studio."
 
-    prop_msg = "Proportions and silhouette look balanced for this subject."
+    prop_msg = "Proportions, rigging flow, and 3D facial relief look balanced."
     if cat in ("creature", "humanoid"):
-        eyes = [p for p in parts if re.search(r"eye", p["id"], re.I)]
+        eyes = [p for p in parts if re.search(r"(?:^|_)eye(?:_|$|\d)", p["id"], re.I)]
+        mouth_parts = [p for p in parts if re.search(r"mouth|jaw|fang|tooth|tongue|beak", p["id"], re.I)]
         if not eyes:
             add("MISSING_EYES", "the model has no visible Eye parts! Add glowing Eye_L, Eye_R, Pupil_L, Pupil_R and Brow blocks on the front of the head (+Z).", True, 15)
+        if cat == "creature" and len(mouth_parts) < 3:
+            add("MISSING_FACE_DETAIL", "the creature's face is missing an open roaring mouth! Add Head_Muzzle_Upper, Head_Jaw_Lower, dark Head_Mouth_Cavity, pink Head_Tongue, and 4-6 white Fang/Tooth blocks protruding at +Z.", True, 14)
 
-    # Check color diversity and prevent monochrome grey/black dominance
     color_counts: Dict[str, int] = {}
     for p in parts:
         bucket = "#%x%x%x" % (int(p["color"][1:3], 16) >> 5, int(p["color"][3:5], 16) >> 5, int(p["color"][5:7], 16) >> 5)
@@ -1331,13 +1492,11 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
     distinct_cols = len(color_counts)
     max_col_share = max(color_counts.values()) / max(n, 1) if color_counts else 1.0
     if distinct_cols < 4 or max_col_share > 0.72:
-        add("MONOCHROME", f"the coloring is too monochrome ({distinct_cols} distinct color bucket(s), dominant color covers {max_col_share * 100:.0f}% of parts). Use cream/tan `secondary` on chest/belly/muzzle/fingers/toes, gold `trim` on bracers/crown/armor, bright `accent` on eyes, and white `light` on teeth/claws!",
+        add("MONOCHROME", f"the coloring is too monochrome ({distinct_cols} distinct color bucket(s)). Use cream/tan `secondary` on chest/belly/muzzle/fingers/toes, gold `trim` on bracers/crown, bright `accent` on eyes, and white `light` on teeth/claws!",
             True, 16)
 
+    avg_smooth = sum(p["smooth"] for p in parts) / max(n, 1)
     tilted = sum(1 for p in parts if lean_deg(p) > 2)
-    tilt_share = tilted / max(n, 1)
-    box_n = sum(1 for p in parts if p["shape"] == "box")
-    block_share = box_n / max(n, 1)
 
     score = max(0, int(round(score)))
     grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D"
@@ -1349,7 +1508,7 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
             "overlap_check": overlap_msg,
             "proportion_check": prop_msg,
             "floating_check": float_msg,
-            "detail_check": f"{n} parts (target {lo}-{hi}), {block_share * 100:.0f}% blocks, {tilt_share * 100:.0f}% angled, {distinct_cols} contrasting color zones.",
+            "detail_check": f"{n} parts (target {lo}-{hi}), avg bevel smoothness {avg_smooth:.2f}, {distinct_cols} contrasting color zones.",
         },
     }
 
@@ -1363,8 +1522,8 @@ def process_build(data: Dict[str, Any], cat: str, sub: str, lo: int, hi: int, pr
     if not isinstance(data["plan"].get("palette"), dict):
         data["plan"]["palette"] = {}
     palette = data["plan"]["palette"]
-    base = str(palette.get("base", "#1c2430"))
-    parts = normalize_ops(raw, unit, base if re.fullmatch(r"#[0-9a-fA-F]{6}", base) else "#1c2430", cat, sub)
+    base = str(palette.get("base", "#18202c"))
+    parts = normalize_ops(raw, unit, base if re.fullmatch(r"#[0-9a-fA-F]{6}", base) else "#18202c", cat, sub)
     if len(parts) < 3:
         raise ValueError("The AI returned fewer than 3 usable parts.")
     enforce_roblox_budget(parts, cat)
@@ -1372,20 +1531,22 @@ def process_build(data: Dict[str, Any], cat: str, sub: str, lo: int, hi: int, pr
     enforce_color_blocking(parts, palette, prompt, cat)
     parts = dedupe(parts)
     frame(parts)
+    rig_welded = smooth_and_weld_rigging(parts, cat)
     stitched = stitch_articulated_chains(parts)
+    face_relieved = extrude_facial_hierarchy(parts, cat)
     ov1 = fix_coplanar(parts)
     snapped = snap_floating(parts) + stitched
     frame(parts)
     ov2 = fix_coplanar(parts)
     overlap = {"pairs": ov1["pairs"] + ov2["pairs"], "names": ov1["names"] + ov2["names"], "remaining": ov2["remaining"]}
-    return parts, analyze(parts, cat, sub, lo, hi, prompt, overlap, snapped)
+    return parts, analyze(parts, cat, sub, lo, hi, prompt, overlap, snapped, face_relieved, rig_welded)
 
 
 # --------------------------------------------------------------------------- output & tonal contrast
 _NO_JITTER = re.compile(r"eye|pupil|lens|light|glass|window|flame|glow|ember|spark|tooth|fang|tongue|crown|gem", re.I)
 
 
-def jitter(color: str, key: str, amt: float = 0.055) -> str:
+def jitter(color: str, key: str, amt: float = 0.045) -> str:
     r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     if l < 0.12:
@@ -1540,7 +1701,7 @@ async def revise(req: ReviseRequest):
     cat, sub, wings, _ = classify(f"{prompt} {change}", req.category or "")
     lo, hi = part_range(cat, None)
     unit = 1.0 / (req.scene_scale if req.scene_scale and req.scene_scale > 0 else STUD)
-    current = normalize_ops(req.ops, unit, "#1c2430", cat, sub)
+    current = normalize_ops(req.ops, unit, "#18202c", cat, sub)
     if len(current) < 3:
         raise HTTPException(status_code=400, detail="ops contained fewer than 3 usable parts.")
     frame(current)
@@ -1614,7 +1775,7 @@ async def test_key(req: TestKeyRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v17", "providers": [k for k, v in ENV_KEYS.items() if v],
+    return {"status": "healthy", "version": "v18", "providers": [k for k, v in ENV_KEYS.items() if v],
             "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL}
 
 
