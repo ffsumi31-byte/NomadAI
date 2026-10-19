@@ -374,7 +374,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
 </div>
 <aside class="side"><div class="logo" data-go="overview"><i data-i="parts"></i>Verdant 3D</div>
 <div class="nav"><i class="nav-ind n"></i><button data-go="overview" class="on"><span data-i="home"></span>Overview</button><button data-go="ai"><span data-i="ai"></span>AI Builder</button><button data-go="parts"><span data-i="parts"></span>Parts</button><button data-go="library"><span data-i="library"></span>Library</button><button data-go="pricing"><span data-i="pricing"></span>Pricing</button></div>
-<div class="sfoot">Current model<br><b id="cnt">0 parts</b><div class="meter" title="Model size (the AI builds up to about 155 parts)"><i id="meter"></i></div><button class="btn pri sm" data-go="pricing" style="margin-top:10px;width:100%">Upgrade</button></div></aside>
+<div class="sfoot">Current model<br><b id="cnt">0 parts</b><div class="meter" title="Model size (the AI builds up to about 240 parts)"><i id="meter"></i></div><button class="btn pri sm" data-go="pricing" style="margin-top:10px;width:100%">Upgrade</button></div></aside>
 
 <main>
 <section class="page on" id="p-overview"><div class="stag">
@@ -398,7 +398,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
 <button class="card tile" data-go="library"><div class="ic" data-i="library"></div><b>Library</b><span>Start from ready-made models and make them yours.</span></button></div>
 <div class="steps3"><div><b>1 · Describe</b><br>Say what you want in your own words.</div><div><b>2 · Adjust</b><br>Resize, move and smooth any part.</div><div><b>3 · Enjoy</b><br>Look around your model from every angle.</div></div></div></section>
 
-<section class="page" id="p-ai"><h2>AI Builder</h2><p class="sub">Describe a model — Serper AI researches what it looks like on the web and the v13 Sculptor builds it part by part.</p>
+<section class="page" id="p-ai"><h2>AI Builder</h2><p class="sub">Describe a model — Serper AI researches what it looks like on the web and the v19 Multi-Slab Sculptor builds it part by part.</p>
 
 <section class="eng" id="eng" aria-labelledby="eng-t">
  <svg class="fx" id="fx" aria-hidden="true"></svg>
@@ -422,13 +422,13 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
     <div class="eng-r">
      <div class="elab" id="mlab">Model / Search Mode</div>
      <div class="mlist" id="mlist" role="radiogroup" aria-labelledby="mlab"></div>
-     <div class="mcus"><label class="elab" for="mcus">Use another model id</label><input id="mcus" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. gemini-3.8-flash, gemini-2.5-flash, gpt-4o"></div>
+     <div class="mcus"><label class="elab" for="mcus">Use another model id</label><input id="mcus" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. gemini-4-argon, gemini-3.8-flash, gpt-4o"></div>
     </div>
    </div>
   </div></div>
  </div>
 </section>
-<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a giant purple kraken squid, a red fire dragon, a sleek sports car, or a medieval watchtower"></textarea>
+<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a giant gorilla with big muscular hands, a giant purple kraken squid, a fierce red fire dragon, or a sleek sports car"></textarea>
 <div class="chips" id="chips"></div>
 <div class="row" style="margin-bottom:8px">
  <select class="sel-cat" id="cat-sel" title="Blueprint category">
@@ -525,7 +525,7 @@ addEventListener('pointermove',e=>{lastMove=e;if(moveRaf)return;moveRaf=requestA
 document.addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('.btn,.chip');if(!b||b.disabled)return;const r=b.getBoundingClientRect(),s=Math.max(r.width,r.height)*2,i=document.createElement('i');i.className='rip';i.style.cssText='width:'+s+'px;height:'+s+'px;left:'+(e.clientX-r.left-s/2)+'px;top:'+(e.clientY-r.top-s/2)+'px';b.appendChild(i);i.addEventListener('animationend',()=>i.remove())});
 const rf=r=>r.style.setProperty('--p',((r.value-r.min)/(r.max-r.min)*100)+'%');
 
-/* ═══ THE CLOUD: Three.js 3D space ═══ */
+/* ═══ THE CLOUD: Three.js 3D space (v19 Studio Brick & Stud Renderer) ═══ */
 const R=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});R.setSize(960,720);
 const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,4/3,.1,200),world=new THREE.Group();scene.add(world);
 scene.add(new THREE.HemisphereLight(0xffffff,0x9fe8c0,1));const sun=new THREE.DirectionalLight(0xffffff,.85);sun.position.set(5,9,6);scene.add(sun);
@@ -533,20 +533,86 @@ const floor=new THREE.Mesh(new THREE.CircleGeometry(4.5,48),new THREE.MeshBasicM
 const parts=new Map(),view={az:.8,el:.45,d:7,tx:0,ty:.8,tz:0,gd:7,gx:0,gy:.8,gz:0};let spin=true,sel=null;
 let lastBuildMeta={prompt:'',category:'',scene_scale:0.28};
 
-function geo(u){const{k,w,h,z,s}=u,seg=Math.round(8+s*40);let g;
- if(k=='box'){const r=s*Math.min(w,h,z)/2*.98,a=new THREE.Vector3(w/2-r,h/2-r,z/2-r),na=a.clone().negate();g=new THREE.BoxGeometry(w,h,z,6,6,6);
-  const p=g.attributes.position,n=g.attributes.normal,v=new THREE.Vector3(),c=new THREE.Vector3();
-  for(let i=0;i<p.count;i++){v.fromBufferAttribute(p,i);c.copy(v).clamp(na,a);v.sub(c).normalize();if(r>0)n.setXYZ(i,v.x,v.y,v.z);p.setXYZ(i,c.x+v.x*r,c.y+v.y*r,c.z+v.z*r)}return g}
+/* Procedural Roblox Stud bump map so blocks read like real Roblox Studio bricks */
+const studCanvas=document.createElement('canvas');
+studCanvas.width=studCanvas.height=64;
+const sctx=studCanvas.getContext('2d');
+sctx.fillStyle='#808080';sctx.fillRect(0,0,64,64);
+sctx.fillStyle='#b8b8b8';sctx.beginPath();sctx.arc(32,32,18,0,Math.PI*2);sctx.fill();
+sctx.strokeStyle='#484848';sctx.lineWidth=3;sctx.stroke();
+const studTex=new THREE.CanvasTexture(studCanvas);
+studTex.wrapS=studTex.wrapT=THREE.RepeatWrapping;
+
+function geo(u){
+ const{k,w,h,z,s}=u,seg=Math.round(12+s*32);let g;
+ if(k=='box'){
+  const clampedS=Math.min(s,0.12);
+  const r=clampedS*Math.min(w,h,z)/2*0.85,a=new THREE.Vector3(w/2-r,h/2-r,z/2-r),na=a.clone().negate();
+  g=new THREE.BoxGeometry(w,h,z,4,4,4);
+  const p=g.attributes.position,v=new THREE.Vector3(),c=new THREE.Vector3();
+  for(let i=0;i<p.count;i++){
+   v.fromBufferAttribute(p,i);c.copy(v).clamp(na,a);v.sub(c);
+   if(v.lengthSq()>1e-8)v.normalize();
+   p.setXYZ(i,c.x+v.x*r,c.y+v.y*r,c.z+v.z*r);
+  }
+  g.computeVertexNormals();
+  return g;
+ }
  g=k=='sphere'?new THREE.SphereGeometry(.5,seg,seg>>1):k=='cylinder'?new THREE.CylinderGeometry(.5,.5,1,seg):k=='cone'?new THREE.ConeGeometry(.5,1,seg):new THREE.TorusGeometry(.32,.15,12,seg);
- g.scale(w,h,z);return g}
-function rebuild(m){const u=m.userData.u;m.geometry.dispose();m.geometry=geo(u);m.material.flatShading=u.s<.15;m.material.needsUpdate=true}
-function mk(u,p,r,quiet){const m=new THREE.Mesh(geo(u),new THREE.MeshStandardMaterial({color:u.c,roughness:.45,metalness:.05,flatShading:u.s<.15}));
- m.userData={u,pop:quiet?1:0};m.position.fromArray(p);if(r)m.rotation.set(...r);m.scale.setScalar(quiet?1:.01);world.add(m);return m}
+ g.scale(w,h,z);
+ g.computeVertexNormals();
+ return g;
+}
+
+function addSeamOutline(m,u){
+ while(m.children.length)m.remove(m.children[0]);
+ if(u.k==='box'){
+  const edges=new THREE.EdgesGeometry(m.geometry,28);
+  const line=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:0.14}));
+  m.add(line);
+ }
+}
+
+function rebuild(m){
+ const u=m.userData.u;
+ m.geometry.dispose();
+ m.geometry=geo(u);
+ m.material.flatShading=u.s<.16;
+ m.material.needsUpdate=true;
+ addSeamOutline(m,u);
+}
+
+function mk(u,p,r,quiet){
+ const isGlow=/^(#ff2a2a|#ff2e2e|#00ffcc|#ffe066)$/i.test(u.c);
+ const tex=studTex.clone();
+ tex.repeat.set(Math.max(1,Math.round(u.w*3.5)),Math.max(1,Math.round(u.z*3.5)));
+ tex.needsUpdate=true;
+ const mat=new THREE.MeshStandardMaterial({
+  color:u.c,
+  roughness:isGlow?0.15:0.42,
+  metalness:u.c==='#f5c518'?0.35:0.06,
+  emissive:isGlow?u.c:'#000000',
+  emissiveIntensity:isGlow?0.55:0,
+  bumpMap:u.k==='box'&&!isGlow?tex:null,
+  bumpScale:0.008,
+  flatShading:u.s<.16
+ });
+ const m=new THREE.Mesh(geo(u),mat);
+ m.castShadow=true;m.receiveShadow=true;
+ addSeamOutline(m,u);
+ m.userData={u,pop:quiet?1:0};
+ m.position.fromArray(p);
+ if(r)m.rotation.set(...r);
+ m.scale.setScalar(quiet?1:.01);
+ world.add(m);
+ return m;
+}
+
 function wipe(){parts.forEach(m=>{world.remove(m);m.geometry.dispose();m.material.dispose()});parts.clear();sel=null}
 const SH=['box','sphere','cylinder','cone','torus'];
 function normShape(s){s=String(s||'box').toLowerCase();if(s=='ball'||s=='ellipsoid'||s=='dome'||s=='lobe'||s=='capsule'||s=='ovoid')return'sphere';if(s=='tube'||s=='pillar'||s=='rod'||s=='disc'||s=='disk'||s=='wheel'||s=='tire'||s=='tyre'||s=='barrel'||s=='shaft')return'cylinder';if(s=='pyramid'||s=='spike'||s=='horn'||s=='fang'||s=='tooth')return'cone';if(s=='ring'||s=='donut'||s=='hoop'||s=='collar')return'torus';return SH.includes(s)?s:'box'}
 function uniq(id){id=String(id||'part').slice(0,40);const b=id;let i=2;while(parts.has(id))id=b+'_'+i++;return id}
-function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.18))),c:hex(o.color)};
+function addPart(o,quiet){const s=dim(o.size||o.scale),sh=normShape(o.shape||o.type),u={k:sh,w:s[0],h:s[1],z:s[2],s:Math.max(0,Math.min(1,nf(o.smooth,.06))),c:hex(o.color)};
  const id=uniq(o.id||o.name||sh),m=mk(u,vec(o.pos||o.position,[0,s[1]/2,0]),(o.rot||o.rotation)?rad(o.rot||o.rotation):null,quiet);parts.set(id,m);return id}
 function apply(o){if(!o||typeof o!='object')throw Error('empty');const op=String(o.op||'add').toLowerCase();const g=()=>{const m=parts.get(o.id);if(!m)throw Error('missing '+o.id);return m};
  switch(op){case'add':return'Added '+addPart(o);
@@ -595,8 +661,8 @@ function select(id){const o=parts.get(sel);if(o)o.material.emissive.setHex(0);se
 const F=[['Width','w',.1,6,.05],['Height','h',.1,6,.05],['Depth','z',.1,6,.05],['Smooth edges','s',0,1,.01],['Left / right','x',-6,6,.05],['Forward / back','pz',-6,6,.05],['Lift','y',0,6,.05],['Rotate','ry',0,360,1]];
 const gv=(m,k)=>k=='x'?m.position.x:k=='y'?m.position.y:k=='pz'?m.position.z:k=='ry'?((m.rotation.y*180/Math.PI)%360+360)%360:m.userData.u[k];
 function sv(m,k,v){if(k=='x')m.position.x=v;else if(k=='y')m.position.y=v;else if(k=='pz')m.position.z=v;else if(k=='ry')m.rotation.y=v*Math.PI/180;else{m.userData.u[k]=v;rebuild(m)}}
-const COLS=['#ffffff','#e6f8ed','#8fe3a9','#3fbf7f','#27c4d8','#a8f0f5','#a8754f','#2b3a36'];
-function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/130*100)+'%';$('#empty').style.opacity=n?0:1;
+const COLS=['#ffffff','#e8dfd1','#f5c518','#ff2a2a','#141c28','#8fe3a9','#27c4d8','#a8754f'];
+function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' parts');$('#meter').style.width=Math.min(100,n/180*100)+'%';$('#empty').style.opacity=n?0:1;
  const pl=$('#plist'),ps=pl.scrollTop;pl.innerHTML='';if(!n)pl.innerHTML='<div class="hint">No parts yet. Add a shape above or use the AI Builder.</div>';
  parts.forEach((m,id)=>{const b=document.createElement('button');b.className='pi'+(id==sel?' on':'');const i=document.createElement('i');i.style.background=m.userData.u.c;b.append(i,id);b.onclick=()=>select(id);pl.appendChild(b)});pl.scrollTop=ps;
  const ins=$('#insp'),m=parts.get(sel);
@@ -617,16 +683,14 @@ function refresh(){const n=parts.size;$('#cnt').textContent=n+(n==1?' part':' pa
  b.onclick=()=>{const n=parts.size,id=addPart({id:l,shape:k,size:[1,1,1],pos:[(n%4-1.5)*1.4,.5,(Math.floor(n/4)%3-1)*1.4]});snap();fit();select(id)};$('#shapes').appendChild(b)});
 $('#undo').onclick=undo;$('#clear').onclick=()=>{wipe();snap();fit();refresh()};
 
-/* ═══ AI Builder + Fallback Offline Skill (mirrors server.py v13 laws) ═══ */
-const SYS0=`You are the VERDANT SCULPTOR: a principal 3D studio artist and master builder who constructs articulated, richly detailed, toy-grade 3D models out of primitive shapes. Reply with ONLY valid JSON (no markdown): {"title":"Name","category":"creature|humanoid|vehicle|structure|prop|plant","ops":[{"op":"add","id":"Group_Part","shape":"box|sphere|cylinder|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.45}]}.
+/* ═══ AI Builder + Fallback Offline Skill (mirrors server.py v19 multi-slab laws) ═══ */
+const SYS0=`You are the VERDANT MASTER BRICK SCULPTOR: an elite Roblox Studio character & boss builder. Reply with ONLY valid JSON (no markdown): {"title":"Name","category":"creature|humanoid|vehicle|structure|prop|plant","ops":[{"op":"add","id":"Group_Part","shape":"box|sphere|cylinder|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.06}]}.
 LAWS:
-1. DENSITY: 80 to 120 parts. Split every big mass into 2-4 layered pieces and add trim, panels, lights, buttons, tufts, straps.
-2. UNITS: meters, Y is up, ground y=0, centered on x=0 z=0, front faces +Z. Whole model 5-10 m long; each part size 0.05-8; positions within +-12.
-3. CYLINDER & CONE AXIS RULE: In Three.js, cylinder and cone always have length along local Y (size[1]) and circular diameter on size[0] and size[2] (keep size[0] == size[2]). To orient along Z, use rot [90,0,0]; along X (like wheels), use rot [0,0,90].
-4. CONNECTED ARTICULATED CHAINS (ZERO FLOATING PARTS): Every limb, tentacle, arm, leg, tail, or neck must be an unbroken chain of overlapping segments (Name_Seg1..4).
-5. SMOOTHNESS & ORGANIC FORM: Use smooth 0.55-0.75 on spheres/cylinders/cones for creatures and foliage; 0.25-0.45 on bevelled body boxes.`;
+1. MULTI-SLAB SCULPTING: Build curves, chests, biceps, forearms, and faces out of 3 to 6 stacked horizontal brick slabs (smooth: 0.06), NEVER one giant rounded cube!
+2. HOLLOW ROARING FACE: Frame a dark Mouth_Pit with Upper_Snout, Left/Right CheekPillars, and Lower_Jaw, with 8 white teeth, pink tongue, and V-angled Brows over glowing red slit Eyes.
+3. UNITS: meters, Y is up, ground y=0, centered on x=0 z=0, front faces +Z. Whole model 5-10 m long; each part size 0.05-8; positions within +-12.`;
 
-const EX=['A giant purple kraken squid','A fierce red fire dragon','A sleek aerodynamic sports car','A medieval stone watchtower','A heroic armored mech knight','A glowing fantasy crystal tree'];
+const EX=['A giant gorilla with big muscular hands','A giant purple kraken squid','A fierce red fire dragon','A sleek aerodynamic sports car','A medieval stone watchtower','A heroic armored mech knight'];
 EX.forEach((t,i)=>{const c=document.createElement('button');c.className='chip';c.textContent=t;c.style.animationDelay=(i*60+120)+'ms';c.onclick=()=>{$('#prompt').value=t;$('#prompt').focus()};$('#chips').appendChild(c)});
 const step=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
 const stepHTML=(h,c)=>{const d=document.createElement('div');if(c)d.className=c;d.innerHTML=h;$('#steps').appendChild(d);$('#steps').scrollTop=1e9};
@@ -642,25 +706,21 @@ async function runOps(ops){
   }catch(e){bad++;}
   progSet((n+1)/ops.length*100);
   if(n%5===0 || n===ops.length-1){fit();refresh();}
-  await sleep(10);
+  await sleep(8);
  }
  return bad;
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-/* ═══ Providers & Models (Synced with server.py v13 aliases & defaults) ═══ */
+/* ═══ Providers & Models (Synced with server.py v19 active 2026 models — zero retired 2.5-flash IDs!) ═══ */
 const PV={
  serper:{name:'Serper',get:'https://serper.dev/api-key',ph:'Paste Serper.dev API key…',def:'serper-web-5',
   fb:[['serper-web-5','Serper Web Search (Top 5)','Recommended'],['serper-deep-10','Serper Deep Context (Top 10)','Rich Anatomy'],['serper-kg','Serper Knowledge Graph','Fast Facts']]},
- gemini:{name:'Gemini',get:'https://aistudio.google.com/app/apikey',ph:'AIza…',def:'gemini-2.5-flash',
+ gemini:{name:'Gemini',get:'https://aistudio.google.com/app/apikey',ph:'AIza…',def:'gemini-3.8-flash',
   fb:[
-   ['gemini-2.5-flash','Gemini 2.5 Flash','Recommended (v13)'],
-   ['gemini-3.8-flash','Gemini 3.8 Flash','v13 Alias → 2.5 Flash'],
-   ['gemini-3.7-flash','Gemini 3.7 Flash','v13 Alias → 2.5 Flash'],
-   ['gemini-3.6-flash','Gemini 3.6 Flash','v13 Alias → 2.5 Flash'],
-   ['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite','Fastest'],
-   ['gemini-2.5-pro','Gemini 2.5 Pro','Deep Reasoning'],
-   ['gemini-2.5-flash-lite','Gemini 2.5 Flash-Lite','Lightest']
+   ['gemini-3.8-flash','Gemini 3.8 Flash','Recommended (Latest)'],
+   ['gemini-4-argon','Gemini 4 Argon (Medium)','Studio Sculptor (v19)'],
+   ['gemini-3.5-flash-lite','Gemini 3.5 Flash-Lite','Fastest']
   ]},
  groq:{name:'Groq',get:'https://console.groq.com/keys',ph:'gsk_…',def:'llama-3.3-70b-versatile',
   fb:[['llama-3.3-70b-versatile','Llama 3.3 70B','Fastest & Smart'],['llama-3.1-8b-instant','Llama 3.1 8B','Instant'],['deepseek-r1-distill-llama-70b','DeepSeek R1 70B','Reasoning'],['qwen-qwq-32b','Qwen QwQ 32B','3D & Math']]},
@@ -671,13 +731,11 @@ const PV={
 };
 
 function normalizeGeminiBrowserModel(m){
- m=String(m||'gemini-2.5-flash').trim().toLowerCase();
- if(/3\.[0-9]|3-flash/.test(m)){
-  if(m.includes('lite'))return'gemini-2.5-flash-lite';
-  if(m.includes('pro'))return'gemini-2.5-pro';
-  return'gemini-2.5-flash';
- }
- return m;
+ m=String(m||'gemini-3.8-flash').trim().toLowerCase().replace(/^models\//,'');
+ if(m.includes('argon')||m.includes('4'))return'gemini-4-argon';
+ if(m.includes('lite'))return'gemini-3.5-flash-lite';
+ if(/2\.5|2\.0|1\.5|3\.7|3\.6|3\.5-flash$/.test(m))return'gemini-3.8-flash';
+ return m||'gemini-3.8-flash';
 }
 
 function detectProviderFromKey(k){
@@ -752,7 +810,7 @@ const H={
    try{
     const u='https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key='+encodeURIComponent(k);
     const j=await api(u,{},18000);
-    const live=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!/image|tts|embed|aqa|imagen|veo|live|audio|robotics|computer|learnlm|vision/i.test(m.name))
+    const live=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!/2\.5|2\.0|1\.5|3\.6|3\.7|image|tts|embed|aqa|imagen|veo|live|audio|robotics|computer|learnlm|vision/i.test(m.name))
      .map(m=>{const id=m.name.replace(/^models\//,'');return[id,m.displayName||id,'']});
     const merged=[...PV.gemini.fb];
     live.forEach(r=>{if(!merged.some(x=>x[0]==r[0]))merged.push(r)});
@@ -768,11 +826,11 @@ const H={
    let j;
    try{
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.32,maxOutputTokens:16384}})});
+     body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:t}]}],generationConfig:{responseMimeType:'application/json',temperature:0.32,maxOutputTokens:24576}})});
    }catch(e){
-    if(realModel!='gemini-2.5-flash')return H.gemini.ask(k,'gemini-2.5-flash',sys,t);
+    if(realModel!=='gemini-3.8-flash')return H.gemini.ask(k,'gemini-3.8-flash',sys,t);
     j=await api(u,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.32,maxOutputTokens:8192}})});
+     body:JSON.stringify({contents:[{role:'user',parts:[{text:sys+'\n\n'+t}]}],generationConfig:{temperature:0.32,maxOutputTokens:16384}})});
    }
    const c=(j.candidates||[])[0];return((c&&c.content&&c.content.parts)||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
   }
@@ -838,14 +896,18 @@ const H={
  }
 };
 
-const AIK='verdant.ai.v4',AI={view:'gemini',active:'',on:{},key:{},model:{},list:{},keep:true};
-(function load(){let c={};try{c=JSON.parse(localStorage.getItem(AIK)||localStorage.getItem('verdant.ai.v3')||localStorage.getItem('verdant.ai.v2')||'{}')||{}}catch(e){}
+const AIK='verdant.ai.v5',AI={view:'gemini',active:'',on:{},key:{},model:{},list:{},keep:true};
+(function load(){let c={};try{c=JSON.parse(localStorage.getItem(AIK)||localStorage.getItem('verdant.ai.v4')||localStorage.getItem('verdant.ai.v3')||'{}')||{}}catch(e){}
  const sget=n=>{try{return localStorage.getItem(n)||sessionStorage.getItem(n)||''}catch(e){return''}};
  AI.keep=c.keep!==undefined?!!c.keep:true;
  AI.model=c.model&&typeof c.model=='object'?c.model:{};
+ if(!AI.model.gemini||/2\.5|2\.0|1\.5|3\.7|3\.6|3\.5-flash$/.test(AI.model.gemini)){
+  AI.model.gemini='gemini-3.8-flash';
+ }
  AI.list=c.list&&typeof c.list=='object'?c.list:{};
+ AI.list.gemini=PV.gemini.fb;
  Object.keys(PV).forEach(p=>{
-  AI.key[p]=sget(AIK+'.'+p)||sget('verdant.ai.v3.'+p)||sget('verdant.ai.v2.'+p)||sget('verdant.ai.v1.'+p);
+  AI.key[p]=sget(AIK+'.'+p)||sget('verdant.ai.v4.'+p)||sget('verdant.ai.v3.'+p)||sget('verdant.ai.v2.'+p);
   AI.on[p]=!!AI.key[p];
  });
  AI.view=PV[c.view]?c.view:'gemini';
@@ -854,7 +916,7 @@ function save(){try{localStorage.setItem(AIK,JSON.stringify({view:AI.view,active
  Object.keys(PV).forEach(p=>{const n=AIK+'.'+p,v=AI.key[p];try{localStorage.removeItem(n);sessionStorage.removeItem(n);if(v)(AI.keep?localStorage:sessionStorage).setItem(n,v)}catch(e){}})}
 
 const eng=$('#eng'),K=$('#key'),EM=$('#emsg');
-const mod=p=>AI.model[p]||PV[p].def;
+const mod=p=>p==='gemini'?normalizeGeminiBrowserModel(AI.model.gemini||PV.gemini.def):(AI.model[p]||PV[p].def);
 const readyLLM=()=>AI.active&&AI.active!='serper'&&AI.on[AI.active]&&AI.key[AI.active]?AI.active:(Object.keys(PV).find(p=>p!='serper'&&AI.on[p]&&AI.key[p])||'');
 const readySerper=()=>AI.on.serper&&AI.key.serper?AI.key.serper:'';
 function models(p){const l=(Array.isArray(AI.list[p])&&AI.list[p].length?AI.list[p]:PV[p].fb).filter(Array.isArray),m=mod(p);return l.some(r=>r[0]==m)?l:[[m,m,'Custom'],...l]}
@@ -868,7 +930,7 @@ let serverHealth={online:false,providers:[]};
   const r=await fetch('/health');
   if(r.ok){
    const j=await r.json();
-   serverHealth={online:true,providers:j.providers||[],version:j.version||'v13'};
+   serverHealth={online:true,providers:j.providers||[],version:j.version||'v19'};
    paintHead();
   }
  }catch(e){}
@@ -877,15 +939,15 @@ let serverHealth={online:false,providers:[]};
 function paintHead(){
  const llm=readyLLM(),srp=!!readySerper();
  eng.classList.toggle('lit',!!llm||srp||serverHealth.online);
- const llmLabel=llm?'<b>'+PV[llm].name+'</b> (<code>'+esc(mod(llm))+'</code>)':(serverHealth.online?'<b>Verdant Server ('+(serverHealth.version||'v13')+')</b>':'<b>Built-in Cloud AI</b>');
+ const llmLabel=llm?'<b>'+PV[llm].name+'</b> (<code>'+esc(mod(llm))+'</code>)':(serverHealth.online?'<b>Verdant Server ('+(serverHealth.version||'v19')+')</b>':'<b>Built-in Cloud AI</b>');
  const srpLabel=srp?' + <b>Serper Web Search</b>':'';
  $('#eng-s').innerHTML='Building with '+llmLabel+srpLabel+'.';
  const pl=$('#epill');pl.classList.remove('off');
- pl.innerHTML='<i></i><span>'+(llm?'<b>'+PV[llm].name+'</b> · '+esc(mod(llm)):srp?'<b>Serper AI</b> + Server':'<b>Verdant v13 AI</b>')+(srp&&llm?' + Serper':'')+'</span>';
+ pl.innerHTML='<i></i><span>'+(llm?'<b>'+PV[llm].name+'</b> · '+esc(mod(llm)):srp?'<b>Serper AI</b> + Server':'<b>Verdant v19 AI</b>')+(srp&&llm?' + Serper':'')+'</span>';
  $$('#etabs button').forEach(b=>{const p=b.dataset.p;b.setAttribute('aria-checked',p==AI.view);b.tabIndex=p==AI.view?0:-1;b.classList.toggle('cn',!!AI.on[p]);b.classList.toggle('u',p==llm||(p=='serper'&&srp));b.setAttribute('aria-label',PV[p].name+(AI.on[p]?', connected':''))});
  $('#etabs i').style.transform='translateX('+Object.keys(PV).indexOf(AI.view)*100+'%)';
 }
-function paintNote(){$('#enote').textContent='Your key stays in this browser. It is sent to your Verdant v13 server to build with '+PV[AI.view].name+' (or directly to '+PV[AI.view].name+' if the server is offline) and is never stored on disk. '+(AI.keep?'It stays on this device until you remove it.':'It is forgotten when you close this tab.')}
+function paintNote(){$('#enote').textContent='Your key stays in this browser. It is sent to your Verdant v19 server to build with '+PV[AI.view].name+' (or directly to '+PV[AI.view].name+' if the server is offline) and is never stored on disk. '+(AI.keep?'It stays on this device until you remove it.':'It is forgotten when you close this tab.')}
 function paintKey(){const p=AI.view,P=PV[p];K.value=AI.key[p]||'';K.placeholder=P.ph;
  $('#klab').textContent=P.name+' API key';const g=$('#kget');g.innerHTML='Get a '+P.name+' key'+ico('ext');g.href=P.get;
  $('#kdel').hidden=!AI.key[p];$('#kgo').textContent=AI.on[p]?'Check again':'Connect';paintNote();say(AI.on[p]?'Connected to '+P.name+'.':'',AI.on[p]?'ok':'')}
@@ -931,7 +993,7 @@ K.oninput=()=>{const det=detectProviderFromKey(K.value);if(det&&det!=AI.view){co
 $('#kshow').onclick=e=>{const b=e.currentTarget,s=K.type=='password';K.type=s?'text':'password';b.setAttribute('aria-pressed',s);b.setAttribute('aria-label',s?'Hide key':'Show key');b.innerHTML=ico(s?'eyeoff':'eye')};
 $('#kdel').onclick=()=>{const p=AI.view;AI.key[p]='';AI.on[p]=false;AI.list[p]=null;if(AI.active==p)AI.active=Object.keys(PV).find(q=>q!='serper'&&AI.on[q])||'';save();paintHead();paintKey();paintModels();say('Key removed.')};
 $('#kkeep').onchange=e=>{AI.keep=e.target.checked;save();paintNote()};
-$('#mcus').onchange=e=>{const v=e.target.value.trim();if(!v)return;const p=AI.view;AI.model[p]=v;if(p!='serper'&&AI.on[p])AI.active=p;e.target.value='';save();paintHead();paintModels();toast('Using '+v)};
+$('#mcus').onchange=e=>{const v=e.target.value.trim();if(!v)return;const p=AI.view;AI.model[p]=p==='gemini'?normalizeGeminiBrowserModel(v):v;if(p!='serper'&&AI.on[p])AI.active=p;e.target.value='';save();paintHead();paintModels();toast('Using '+AI.model[p])};
 $('#eng-tg').onclick=()=>openEng(eng.classList.contains('closed'));
 $('#epill').onclick=nudge;
 $('#kkeep').checked=AI.keep;paintHead();paintKey();paintModels();openEng(!readyLLM()&&!readySerper());
@@ -964,7 +1026,6 @@ const why=(e,p)=>{const n=p&&PV[p]?PV[p].name:'The AI',c=e&&e.code;
 async function fetchWebResearch(query){
  if(!$('#use-serper').checked)return '';
  const sk=readySerper();
- /* If server.py is online, let server.py run its parallel dual-query Serper anatomical research */
  if(serverHealth.online&&location.protocol!=='file:')return '';
  if(sk){
   try{
@@ -994,8 +1055,6 @@ async function fetchWebResearch(query){
 }
 
 async function askServerGenerate(rawQuery,webContext,llm){
- /* Sends the request to server.py (/generate) with a 175s timeout so v13's Cylinder Healer,
-    Kinematic Chain Stitcher, Two-Stage Floating Snapper, and Auto-Revise rounds complete cleanly. */
  if(location.protocol==='file:')return null;
  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),175000);
  try{
@@ -1080,7 +1139,7 @@ function parseAIResponse(text){
  let j;
  try{j=JSON.parse(clean.slice(a,b+1))}catch(e){throw{code:'empty'}}
  const rawOps=Array.isArray(j.ops)?j.ops:(Array.isArray(j.parts)?j.parts:[]);
- const ops=rawOps.filter(x=>x&&typeof x=='object').map(o=>({...o,op:o.op||'add'})).slice(0,160);
+ const ops=rawOps.filter(x=>x&&typeof x=='object').map(o=>({...o,op:o.op||'add'})).slice(0,240);
  if(!ops.length)throw{code:'empty'};
  return{
   title:j.title||j.name||'your model',
@@ -1130,7 +1189,7 @@ async function build(){
  try{
   const webCtx=await fetchWebResearch(t);
   const via=readyLLM();
-  step('Sculpting 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Verdant v13 Cloud AI')+'…');
+  step('Sculpting 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Verdant v19 Cloud AI')+'…');
   const text=await askAI(t,webCtx);
   const parsed=parseAIResponse(text);
   lastBuildMeta={
@@ -1212,7 +1271,7 @@ const TPL={House:['home',[L('box',[2,1.2,2],[0,.6,0],'#ffffff'),L('cone',[3,1.1,
  Rocket:['rocket',[L('cylinder',[.9,2.4,.9],[0,1.4,0],'#ffffff'),L('cone',[.9,.9,.9],[0,3.05,0],'#27c4d8'),L('sphere',[.4,.4,.2],[0,1.9,.42],'#8fe3a9'),L('box',[.1,.7,.6],[-.55,.5,0],'#27c4d8'),L('box',[.1,.7,.6],[.55,.5,0],'#27c4d8')]]};
 Object.entries(TPL).forEach(([n,[ic,rows]])=>{const b=document.createElement('button');b.className='card tile';b.innerHTML='<div class="ic"></div><b></b><span></span>';
  b.children[0].innerHTML=ico(ic);b.children[1].textContent=n;b.children[2].textContent=rows.length+' parts · open in Parts';
- b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+'_'+(i+1),shape:k,size:s,pos:p,color:c,smooth:.18})));snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
+ b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+'_'+(i+1),shape:k,size:s,pos:p,color:c,smooth:.06})));snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
 
 /* ═══ Result card + navigation ═══ */
 $$('[data-v]').forEach(b=>b.onclick=()=>{const[a,e]=b.dataset.v.split(',').map(Number);spin=false;$('#spin').classList.remove('on');view.az=a;view.el=e});
@@ -1303,7 +1362,6 @@ textarea{border-radius:10px;box-shadow:inset 0 1px 2px rgba(15,42,32,.05)}
   sun.castShadow=true;const sh=sun.shadow;sh.mapSize.set(1024,1024);Object.assign(sh.camera,{left:-7,right:7,top:7,bottom:-7,near:1,far:30});sh.camera.updateProjectionMatrix();sh.bias=-.0006;
   const gr=new THREE.Mesh(new THREE.CircleGeometry(4.5,64),new THREE.ShadowMaterial({opacity:.22}));gr.rotation.x=-Math.PI/2;gr.position.y=.004;gr.receiveShadow=true;scene.add(gr);
   const pg=new THREE.PolarGridHelper(4.5,12,5,64,0x178a4c,0x8fe3a9);pg.position.y=.006;pg.material.transparent=true;pg.material.opacity=.35;scene.add(pg);
-  const _mk=mk;mk=function(){const m=_mk.apply(this,arguments);m.castShadow=true;return m};
   parts.forEach(m=>m.castShadow=true);
  }catch(e){}
  /* live camera readout in the viewport */
@@ -1459,82 +1517,6 @@ h1 em{background:linear-gradient(90deg,var(--g),#27c4d8 50%,var(--g)) 0 0/200% 1
   if(cur&&cur!==t)clr(cur,['--rx','--ry']);cur=t;if(t){const r=t.getBoundingClientRect();t.style.setProperty('--ry',((m.clientX-r.left)/r.width-.5)*10+'deg');t.style.setProperty('--rx',(.5-(m.clientY-r.top)/r.height)*8+'deg')}
   if(mag&&mag!==b)clr(mag,['--bx','--by']);mag=b;if(b){const r=b.getBoundingClientRect();b.style.setProperty('--bx',((m.clientX-r.left)/r.width-.5)*8+'px');b.style.setProperty('--by',((m.clientY-r.top)/r.height-.5)*6+'px')}})},{passive:true});
  document.addEventListener('pointerleave',()=>{clr(cur,['--rx','--ry']);clr(mag,['--bx','--by'])});
-})();
-<script id="verdant-v19-cloud-upgrade">
-(()=>{
- if(typeof THREE==='undefined'||typeof R==='undefined')return;
-
- /* 1. Add Gemini 4 Argon (Medium) to the UI model selector */
- if(typeof PV!=='undefined'&&PV.gemini&&Array.isArray(PV.gemini.fb)){
-  if(!PV.gemini.fb.some(r=>r[0]==='gemini-4-argon-medium')){
-   PV.gemini.fb.unshift(['gemini-4-argon-medium','Gemini 4 Argon (Medium)','Studio Sculptor (v19)']);
-   if(typeof paintModels==='function')paintModels();
-  }
- }
-
- /* 2. Generate a procedural Roblox Stud bump texture so bricks look like real Roblox Studio parts */
- const studCanvas=document.createElement('canvas');
- studCanvas.width=studCanvas.height=64;
- const sctx=studCanvas.getContext('2d');
- sctx.fillStyle='#808080';sctx.fillRect(0,0,64,64);
- sctx.fillStyle='#b8b8b8';sctx.beginPath();sctx.arc(32,32,18,0,Math.PI*2);sctx.fill();
- sctx.strokeStyle='#484848';sctx.lineWidth=3;sctx.stroke();
- const studTex=new THREE.CanvasTexture(studCanvas);
- studTex.wrapS=studTex.wrapT=THREE.RepeatWrapping;
-
- /* 3. Upgrade geo() so boxes have crisp Roblox chamfers and proper vertex normals (never puffy pillows!) */
- window.geo=function(u){
-  const{k,w,h,z,s}=u,seg=Math.round(12+s*32);let g;
-  if(k=='box'){
-   const clampedS=Math.min(s,0.14);
-   const r=clampedS*Math.min(w,h,z)/2*0.85,a=new THREE.Vector3(w/2-r,h/2-r,z/2-r),na=a.clone().negate();
-   g=new THREE.BoxGeometry(w,h,z,4,4,4);
-   const p=g.attributes.position,v=new THREE.Vector3(),c=new THREE.Vector3();
-   for(let i=0;i<p.count;i++){
-    v.fromBufferAttribute(p,i);c.copy(v).clamp(na,a);v.sub(c);
-    if(v.lengthSq()>1e-8)v.normalize();
-    p.setXYZ(i,c.x+v.x*r,c.y+v.y*r,c.z+v.z*r);
-   }
-   g.computeVertexNormals();
-   return g;
-  }
-  g=k=='sphere'?new THREE.SphereGeometry(.5,seg,seg>>1):k=='cylinder'?new THREE.CylinderGeometry(.5,.5,1,seg):k=='cone'?new THREE.ConeGeometry(.5,1,seg):new THREE.TorusGeometry(.32,.15,12,seg);
-  g.scale(w,h,z);
-  g.computeVertexNormals();
-  return g;
- };
-
- /* 4. Upgrade mk() with Roblox stud texture, subtle brick seam lines, and Neon glow on eyes */
- window.mk=function(u,p,r,quiet){
-  const isGlow=/^(#ff2a2a|#ff2e2e|#00ffcc|#ffe066)$/i.test(u.c);
-  const tex=studTex.clone();
-  tex.repeat.set(Math.max(1,Math.round(u.w*3.5)),Math.max(1,Math.round(u.z*3.5)));
-  tex.needsUpdate=true;
-  const mat=new THREE.MeshStandardMaterial({
-   color:u.c,
-   roughness:isGlow?0.15:0.42,
-   metalness:u.c==='#f5c518'?0.35:0.06,
-   emissive:isGlow?u.c:'#000000',
-   emissiveIntensity:isGlow?0.55:0,
-   bumpMap:u.k==='box'&&!isGlow?tex:null,
-   bumpScale:0.008,
-   flatShading:u.s<0.16
-  });
-  const m=new THREE.Mesh(window.geo(u),mat);
-  m.castShadow=true;m.receiveShadow=true;
-  /* Crisp dark seam outline so stacked slabs read as individual Roblox bricks */
-  if(u.k==='box'){
-   const edges=new THREE.EdgesGeometry(m.geometry,28);
-   const line=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:0.14}));
-   m.add(line);
-  }
-  m.userData={u,pop:quiet?1:0};
-  m.position.fromArray(p);
-  if(r)m.rotation.set(...r);
-  m.scale.setScalar(quiet?1:.01);
-  world.add(m);
-  return m;
- };
 })();
 </script>
 </body></html>
