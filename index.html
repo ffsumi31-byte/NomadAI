@@ -1460,5 +1460,81 @@ h1 em{background:linear-gradient(90deg,var(--g),#27c4d8 50%,var(--g)) 0 0/200% 1
   if(mag&&mag!==b)clr(mag,['--bx','--by']);mag=b;if(b){const r=b.getBoundingClientRect();b.style.setProperty('--bx',((m.clientX-r.left)/r.width-.5)*8+'px');b.style.setProperty('--by',((m.clientY-r.top)/r.height-.5)*6+'px')}})},{passive:true});
  document.addEventListener('pointerleave',()=>{clr(cur,['--rx','--ry']);clr(mag,['--bx','--by'])});
 })();
+<script id="verdant-v19-cloud-upgrade">
+(()=>{
+ if(typeof THREE==='undefined'||typeof R==='undefined')return;
+
+ /* 1. Add Gemini 4 Argon (Medium) to the UI model selector */
+ if(typeof PV!=='undefined'&&PV.gemini&&Array.isArray(PV.gemini.fb)){
+  if(!PV.gemini.fb.some(r=>r[0]==='gemini-4-argon-medium')){
+   PV.gemini.fb.unshift(['gemini-4-argon-medium','Gemini 4 Argon (Medium)','Studio Sculptor (v19)']);
+   if(typeof paintModels==='function')paintModels();
+  }
+ }
+
+ /* 2. Generate a procedural Roblox Stud bump texture so bricks look like real Roblox Studio parts */
+ const studCanvas=document.createElement('canvas');
+ studCanvas.width=studCanvas.height=64;
+ const sctx=studCanvas.getContext('2d');
+ sctx.fillStyle='#808080';sctx.fillRect(0,0,64,64);
+ sctx.fillStyle='#b8b8b8';sctx.beginPath();sctx.arc(32,32,18,0,Math.PI*2);sctx.fill();
+ sctx.strokeStyle='#484848';sctx.lineWidth=3;sctx.stroke();
+ const studTex=new THREE.CanvasTexture(studCanvas);
+ studTex.wrapS=studTex.wrapT=THREE.RepeatWrapping;
+
+ /* 3. Upgrade geo() so boxes have crisp Roblox chamfers and proper vertex normals (never puffy pillows!) */
+ window.geo=function(u){
+  const{k,w,h,z,s}=u,seg=Math.round(12+s*32);let g;
+  if(k=='box'){
+   const clampedS=Math.min(s,0.14);
+   const r=clampedS*Math.min(w,h,z)/2*0.85,a=new THREE.Vector3(w/2-r,h/2-r,z/2-r),na=a.clone().negate();
+   g=new THREE.BoxGeometry(w,h,z,4,4,4);
+   const p=g.attributes.position,v=new THREE.Vector3(),c=new THREE.Vector3();
+   for(let i=0;i<p.count;i++){
+    v.fromBufferAttribute(p,i);c.copy(v).clamp(na,a);v.sub(c);
+    if(v.lengthSq()>1e-8)v.normalize();
+    p.setXYZ(i,c.x+v.x*r,c.y+v.y*r,c.z+v.z*r);
+   }
+   g.computeVertexNormals();
+   return g;
+  }
+  g=k=='sphere'?new THREE.SphereGeometry(.5,seg,seg>>1):k=='cylinder'?new THREE.CylinderGeometry(.5,.5,1,seg):k=='cone'?new THREE.ConeGeometry(.5,1,seg):new THREE.TorusGeometry(.32,.15,12,seg);
+  g.scale(w,h,z);
+  g.computeVertexNormals();
+  return g;
+ };
+
+ /* 4. Upgrade mk() with Roblox stud texture, subtle brick seam lines, and Neon glow on eyes */
+ window.mk=function(u,p,r,quiet){
+  const isGlow=/^(#ff2a2a|#ff2e2e|#00ffcc|#ffe066)$/i.test(u.c);
+  const tex=studTex.clone();
+  tex.repeat.set(Math.max(1,Math.round(u.w*3.5)),Math.max(1,Math.round(u.z*3.5)));
+  tex.needsUpdate=true;
+  const mat=new THREE.MeshStandardMaterial({
+   color:u.c,
+   roughness:isGlow?0.15:0.42,
+   metalness:u.c==='#f5c518'?0.35:0.06,
+   emissive:isGlow?u.c:'#000000',
+   emissiveIntensity:isGlow?0.55:0,
+   bumpMap:u.k==='box'&&!isGlow?tex:null,
+   bumpScale:0.008,
+   flatShading:u.s<0.16
+  });
+  const m=new THREE.Mesh(window.geo(u),mat);
+  m.castShadow=true;m.receiveShadow=true;
+  /* Crisp dark seam outline so stacked slabs read as individual Roblox bricks */
+  if(u.k==='box'){
+   const edges=new THREE.EdgesGeometry(m.geometry,28);
+   const line=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:0.14}));
+   m.add(line);
+  }
+  m.userData={u,pop:quiet?1:0};
+  m.position.fromArray(p);
+  if(r)m.rotation.set(...r);
+  m.scale.setScalar(quiet?1:.01);
+  world.add(m);
+  return m;
+ };
+})();
 </script>
 </body></html>
