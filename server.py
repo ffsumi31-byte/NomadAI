@@ -1,5 +1,14 @@
 """
-Verdant 3D - studio-grade multi-AI backend (v13)
+Verdant 3D - Roblox-native multi-AI backend (v14)
+
+Upgrades in v14 (Roblox-native modelling):
+A. Prompt rewritten block-first: >=75% Roblox Blocks, stepped curves instead of spheres,
+   mostly axis-aligned parts, tilts in 15 degree steps, chunky minimum sizes, and a
+   plan.reference / plan.must_have fidelity checklist so models match the real character.
+B. Healers no longer turn boxes into spheres or raise smoothness; a Roblox shape policy turns
+   stray spheres / cones / tori / organic cylinders back into blocks and snaps to a 0.25 grid.
+C. Checker now flags over-tilted and over-rounded builds instead of rewarding tilted pieces.
+D. Fixed mangled markdown URLs in /test-key.
 
 Upgrades in v13:
 1. Full native support for gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash,
@@ -37,7 +46,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v13)")
+app = FastAPI(title="Verdant 3D - Studio-grade Multi-AI Backend (v14)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -106,7 +115,7 @@ MIN_PART_STUDS = 0.16
 SCENE_MAX_M = 12.0
 PUSH = 0.12               # 0.12 stud offset so decals/trim never z-fight
 SHAPES = {"box", "sphere", "cylinder", "cone", "torus"}
-SMOOTH_DEFAULT = {"box": 0.18, "sphere": 0.68, "cylinder": 0.56, "cone": 0.48, "torus": 0.62}
+SMOOTH_DEFAULT = {"box": 0.04, "sphere": 0.5, "cylinder": 0.2, "cone": 0.3, "torus": 0.4}
 SHAPE_ALIAS = {
     "cube": "box", "block": "box", "brick": "box", "plate": "box", "wedge": "box", "ramp": "box",
     "slope": "box", "part": "box", "roof": "box", "panel": "box", "plank": "box",
@@ -125,119 +134,109 @@ PART_RANGE = {
 GATE = 0.78
 
 # --------------------------------------------------------------------------- the skill
-CORE_SKILL = """You are the VERDANT SCULPTOR: a principal 3D studio artist and master builder who constructs articulated, richly detailed, toy-grade 3D models out of primitive shapes. Every model must have an unmistakable 3D silhouette from every angle, smooth organic curves where appropriate, and zero floating parts.
+CORE_SKILL = """You are the VERDANT SCULPTOR: a veteran Roblox builder who constructs chunky, readable, game-ready models out of Roblox Parts. You think like someone building in Roblox Studio with Block, Cylinder and Ball parts (plus tilted Blocks for slopes) - NOT like a clay sculptor. The result must look like a real Roblox build: crisp straight edges, curves made from stepped blocks, a strong silhouette from every angle, and zero floating parts.
 
 OUTPUT - reply with ONE valid JSON object and nothing else (no markdown fences, no comments, no prose):
 {
   "title": "Short Name",
   "category": "creature|humanoid|vehicle|structure|prop|plant",
   "plan": {
+    "reference": "2-3 sentences: what the REAL subject looks like - the exact character/creature/object, its body plan, its markings and colours",
+    "must_have": ["countable features that MUST appear, with numbers, e.g. '8 arms', '2 big yellow eyes with slit pupils', 'cream belly', '4 wheels'"],
     "signature_features": ["6-10 traits that make the subject recognisable in one second"],
     "palette": {"base":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb","dark":"#rrggbb","light":"#rrggbb"},
     "proportions": "one sentence with exact width:height:length ratios in studs",
     "sections": {"Head": 18, "Body": 22}
   },
   "ops": [
-    {"id":"Group_Part","shape":"box|sphere|cylinder|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.45}
+    {"id":"Group_Part","shape":"box|cylinder|sphere|cone|torus","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.04}
   ]
 }
 
-CRITICAL THREE.JS & ROBLOX GEOMETRY LAWS (FOLLOW STRICTLY):
-1. COORDINATES: Units are STUDS. Y is UP, ground is y=0, model is centred on x=0, z=0, and the FRONT faces +Z (X = left/right width, Y = vertical height, Z = front/back length).
-2. CYLINDER & CONE AXIS RULE:
-   - In Three.js, a `cylinder` or `cone` ALWAYS has its length/height along its local Y axis (`size[1]`), while `size[0]` and `size[2]` are its circular diameter!
-   - Always keep `size[0]` and `size[2]` EQUAL (`[diameter, length, diameter]`).
-   - To orient a cylinder or cone along Z (front-to-back, like a horizontal tentacle, tail, barrel, or exhaust), use `"size": [diameter, length, diameter]` and tilt `"rot": [90, 0, 0]` (or `[75, yaw, 0]`).
-   - To orient a cylinder or cone along X (left-to-right, like a wheel, axle, or T-pose arm), use `"size": [diameter, length, diameter]` and `"rot": [0, 0, 90]`.
-3. CONNECTED ARTICULATED CHAINS (ZERO FLOATING PARTS):
-   - Every limb, tentacle, arm, leg, tail, neck, or branch MUST be an unbroken chain of overlapping segments (`Name_Seg1`, `Name_Seg2`, `Name_Seg3`, `Name_Seg4`).
-   - If segment `k` has centre `P_k` and length `L_k`, the next segment `P_{k+1}` MUST sit at a distance of `0.42 * (L_k + L_{k+1})` from `P_k` so the two segments physically overlap at the joint! Never space chain segments further apart than their lengths.
-   - Suckers, claws, spikes, eyes, pupils, and pads MUST touch/overlap the surface of the parent segment they sit on.
-4. SMOOTHNESS & ORGANIC FORM:
-   - Use `"smooth": 0.55` to `0.75` on `sphere`, `cylinder`, `cone`, and `torus` parts for creatures, characters, foliage, and tires.
-   - Use `"smooth": 0.25` to `0.45` on bevelled body `box` parts (cars, creature chests, cushions, helmets), and `"smooth": 0.05` only on sharp architectural walls, blades, or crystals.
-   - For organic creatures (squids, dragons, animals, birds), build heads, mantles, torsos, and limbs from overlapping `sphere`, `cylinder`, and `cone` primitives — NEVER build organic heads or fins out of flat un-bevelled rectangular boxes!
-5. NO COPLANAR Z-FIGHTING & HIGH CONTRAST PALETTE:
-   - Eyes, pupils, belly plates, stripes, windows, and trim must protrude by at least `0.15` studs proud of the parent surface.
-   - Use 5 distinct, high-contrast hex colours (`base`, `secondary` counter-shade/belly/under-mantle, `accent` bioluminescence/eyes/lights, `dark` pupils/beak/joints/tires, `light` suckers/teeth/highlights)."""
+ROBLOX BUILD LAWS (FOLLOW STRICTLY):
+1. COORDINATES: Units are STUDS. Y is UP, ground is y=0, model is centred on x=0, z=0, and the FRONT faces +Z (X = left/right width, Y = vertical height, Z = front/back length). Prefer sizes and positions on a 0.5-stud grid (e.g. 2, 2.5, 3), like a builder snapping in Studio.
+2. SHAPE BUDGET - this is what makes it a Roblox model and not a clay blob:
+   - `box` = Roblox Block. At least 75% of ALL parts must be `box`. Heads, bodies, mantles, limbs, fins, wings, roofs, hoods, armor, leaves, rocks: all blocks.
+   - `cylinder` = Roblox Cylinder. Only for things that are really round and straight: wheels, barrels, pillars, pipes, trunks, wands, gun barrels. Never for organic limbs, tentacles, tails or necks.
+   - `sphere` = Roblox Ball. At most 8% of parts, ONLY for eyes, pearls, gems, orbs, balls, small knobs. Never for heads, bodies, bellies, mantles, fins, or foliage.
+   - `cone` and `torus` do not exist in Roblox. Use them at most 3 times in a whole model, only for tiny spikes or ring/halo accents.
+3. CURVES = STEPS. Make a dome, a belly, a mantle, a head or a hill from 3-6 stacked or stepped blocks that each shrink 12-20% (a staircase silhouette), not from one round shape. Make a taper by chaining boxes that get thinner.
+4. STAY AXIS-ALIGNED. At least 65% of parts must have rot [0,0,0]. Tilt only where a real builder would tilt a Block: slopes (hoods, roofs, windshields), wings, spars, bent limb segments, tails. Tilt on ONE axis at a time, in 15 degree steps (15, 30, 45, 60, 75, 90). Eyes, pupils, trim, teeth, windows and plates are never tilted.
+5. CHUNKY SIZES. Every body mass and limb segment is at least 1.5 studs thick. Only eyes, pupils, teeth, suckers, rivets and trim may be smaller (0.4-1.2 studs). A Roblox build reads best with a big head, thick limbs and clear gaps between fingers/legs.
+6. `smooth` is only a tiny bevel: 0.0-0.08 on boxes, up to 0.25 on cylinders. Do NOT raise it to fake roundness.
+7. CYLINDER AXIS RULE: a `cylinder` always has its length along local Y (`size[1]`) and diameter on `size[0]` and `size[2]`, which must be EQUAL (`[diameter, length, diameter]`). To lay it along Z use `"rot": [90, 0, 0]`; to lay it along X (wheels, axles) use `"rot": [0, 0, 90]`.
+8. CONNECTED CHAINS, ZERO FLOATING PARTS: every limb, tentacle, arm, leg, tail, neck, wing arm or branch is an unbroken chain of overlapping box segments (`Name_Seg1`, `Name_Seg2`, ...). If segment k has centre P_k and length L_k, then P_(k+1) is at distance 0.42 * (L_k + L_(k+1)) from P_k so neighbours physically overlap at the joint. Details (suckers, claws, eyes, pupils, teeth, pads) must touch or overlap the part they sit on.
+9. NO COPLANAR Z-FIGHTING: eyes, pupils, belly plates, stripes, windows and trim stand at least 0.15 stud proud of the surface they sit on.
+10. FIDELITY TO THE REAL THING: build what the reference actually looks like. If the subject is a named character, creature, vehicle or game item, reproduce ITS well-known design: the exact colours, number of limbs/eyes/horns/wheels, face shape, markings and accessories from the reference text. Fill `plan.must_have` with the counts first, then make sure every item exists in `ops`. Do not invent extra limbs, change its colours, or turn it into a generic version.
+11. COLOUR: use 5 distinct high-contrast hex colours: `base`, `secondary` (belly/under-side/counter-shade), `accent` (eyes, lights, glow), `dark` (pupils, beak, joints, tires), `light` (suckers, teeth, highlights). Name every part `Group_Detail`."""
 
 BLUEPRINTS = {
-    "creature_multi": """BLUEPRINT - CEPHALOPOD (SQUID / OCTOPUS / KRAKEN) OR ARACHNID / CRUSTACEAN, @LO@-@HI@ parts:
+    "creature_multi": """BLUEPRINT - CEPHALOPOD (SQUID / OCTOPUS / KRAKEN) OR ARACHNID / CRUSTACEAN, @LO@-@HI@ parts, built from Roblox blocks:
 - IF SQUID / OCTOPUS / KRAKEN / CUTTLEFISH:
-  - OVERALL POSE & SILHOUETTE: Dynamic 3D swimming or rearing kraken pose spanning 26-36 studs wide across X and Z! NEVER build a vertical totem-pole tube, and NEVER use sharp boxes for the mantle or fins.
-  - SCULPTED MANTLE / GIANT HEAD (20-26 parts):
-    - Build the mantle as a lush, bulbous, hydrodynamic dome/torpedo arched at `rot: [28, 0, 0]` (rising from `y=9, z=0` up and back to `y=20, z=-10`).
-    - Construct it from 6-8 overlapping, progressively tapering `sphere` and `cylinder` lobes (`Mantle_Core1` .. `Mantle_Core6`, `smooth: 0.7`) plus a conical tip (`Mantle_Tip`, `shape: "cone"`, `smooth: 0.6`), lighter under-mantle counter-shading (`Mantle_Belly1..3`), a flared muscular neck collar (`Mantle_Collar`, `shape: "torus"`), and a ventral jet siphon tube (`Mantle_Siphon`).
-    - LATERAL FINS (8-10 parts): At the upper-rear sides of the mantle, build 2 wide, graceful diamond/heart-shaped fins flaring out to `-X` and `+X` (`Fin_L_Base`, `Fin_L_Mid`, `Fin_L_Tip` and `Fin_R_Base`, `Fin_R_Mid`, `Fin_R_Tip`) using flattened smooth ellipsoids (`shape: "sphere"`, `smooth: 0.65`) and tapered cones — NEVER rectangular boxes!
-    - BIOLUMINESCENT SPOTS / RIDGES (6-8 parts): Glowing accent spheres/ridges embedded along the dorsal mantle crest.
-  - EXPRESSIVE HEAD & BEAK (12-16 parts):
-    - Positioned directly attached below the mantle collar (`y=6..10, z=0..+3`): cranial bulb (`Head_Core`, `sphere`), heavy左/右 ocular brow ridges (`Head_Brow_L`, `Head_Brow_R`), 2 huge protruding side eyes (`Eye_L_Sclera`, `Eye_R_Sclera` in vivid yellow/gold `#ffd84d`, `Eye_L_Iris`, `Eye_R_Iris`, and vertical dark slit pupils `Eye_L_Pupil`, `Eye_R_Pupil` proud on the outer face), plus a dark hooked chitinous beak (`Beak_Upper`, `Beak_Lower`, `shape: "cone"`) at the center of the arm crown.
-  - 8 RADIALLY SPLAYED ARMS + 2 LONG FEEDING TENTACLES (10 limbs x 5-6 parts = 52-60 parts):
-    - All 8 arms (`Arm_FL`, `Arm_FR`, `Arm_ML`, `Arm_MR`, `Arm_BL`, `Arm_BR`, `Arm_TopL`, `Arm_TopR`) MUST originate at the arm crown right below the head (`radius 2.5` around `x=0, y=5.5, z=+2`) and radiate outward in a 360-degree fan across X and Z in sweeping S-curves down toward `y=0.5..3.0`!
-    - Every arm consists of 4 connected, overlapping `cylinder` or `sphere` segments (`Arm_FL_Seg1` -> `Arm_FL_Seg2` -> `Arm_FL_Seg3` -> `Arm_FL_Tip`, `size: [diameter, length, diameter]`, `smooth: 0.65`) where each segment's centre is within `0.8 * length` of the previous segment so there are ZERO gaps!
-    - The 2 feeding tentacles (`Tentacle_L_Seg1..4`, `Tentacle_R_Seg1..4`) sweep forward (+Z) and outward (-X/+X), ending in a broadened ovoid club (`Tentacle_L_Club`, `Tentacle_R_Club`, `shape: "sphere"`) with 2-3 contrasting light-purple/cream sucker discs (`Tentacle_L_Suck1..2`, `Tentacle_R_Suck1..2`, `shape: "sphere"`) directly touching the underside of each club and arm!
+  - POSE: wide rearing stance spanning 26-36 studs across X and Z, mantle rising behind the head. NEVER a thin vertical tube.
+  - MANTLE (18-24 parts): a STEPPED, tapering stack of 6-8 blocks (`Mantle_1` .. `Mantle_8`). Each step is 12-18% smaller than the one below and sits 1-2 studs further back (-Z) and higher, so the stack leans back like a staircase without rotating. Add 3 lighter belly plates on the front face (`Mantle_Belly1..3`), a dark dorsal crest of 3-4 small blocks, a wide flat collar block (`Mantle_Collar`) where mantle meets head, and a siphon block under the head.
+  - FINS (8-10 parts): two flat wide plates on the upper mantle, one each side (`Fin_L_1..4`, `Fin_R_1..4`), 0.8-1.2 studs thick, stepping outward and getting thinner like a diamond.
+  - HEAD (12-16 parts): a wide chunky head block (`Head_Core`), brow blocks above the eyes, two LARGE square eyes (`Eye_L`, `Eye_R`, bright yellow #ffd84d, 2.5-3 studs) on the outer-front faces, a tall thin dark pupil block on each (`Pupil_L`, `Pupil_R`, proud 0.15), and a dark two-block beak (`Beak_Upper`, `Beak_Lower`) at the centre of the arm crown.
+  - 8 ARMS + 2 FEEDING TENTACLES (10 limbs x 5-6 blocks): each limb is an unbroken chain of box segments (`Arm_FL_Seg1..4`, `Tentacle_L_Seg1..5`) that starts at the arm crown under the head, fans out radially across X and Z, tapers about 15% per segment and ends near the ground. Seg1 is at least 2 studs thick. Bend a limb with at most two 15-30 degree turns and keep the rest axis-aligned. Feeding tentacles are longer and end in a wider club block (`Tentacle_L_Club`). Add 2-3 small light sucker blocks (0.7 studs, proud 0.15, `Arm_FL_Suck1..2`) on the underside or inner face of each arm.
 - IF SPIDER / SCORPION / CRAB:
-  - Sculpted cephalothorax + segmented abdomen (`sphere` lobes), 8 arched 4-segment legs (`Coxa -> Femur -> Tibia -> Tarsus` touching `y=0`), front pedipalps/claws, eye cluster (6-8 glowing spheres), and segmented stinger tail if scorpion.""",
+  - Chunky block cephalothorax + stepped abdomen, 8 (or 6/10) legs as 3-4 block chains (`Leg_FL_Seg1..4`) with a clear knee bend, claws as two-block pincers, a cluster of small eye blocks, and a segmented block tail with a stinger if scorpion.""",
 
-    "creature_dragon": """BLUEPRINT - DRAGON / WYVERN / WINGED BEAST, @LO@-@HI@ parts:
-- Posture & Silhouette: Commanding 3D stance (28-38 studs wingspan along X, 26-34 studs length along Z).
-- Head & S-Curved Neck (20-26 parts): 4-5 overlapping neck segments (`Neck_Seg1..4` with dorsal spines + lighter throat plates), sculpted upper snout (`Head_Snout`), hinged lower jaw (`Head_Jaw`) with 6-8 white conical fangs, nostrils, glowing eyes + slit pupils, brow ridges, and 2 swept-back segmented horns (`Horn_L_1..3`, `Horn_R_1..3`, `shape: "cone"`).
-- Torso & Armored Belly (14-18 parts): Broad muscular chest (`Torso_Chest`), 5-6 overlapping lighter belly scutes (`Belly_Plate1..5`), ribcage, haunches, and dorsal spine spikes running down the back.
-- 2 Massive Articulated Wings (2 x 14-18 = 28-36 parts): Sweeping wide along `-X` and `+X`! Each wing has `Wing_L_Shoulder`, `Wing_L_UpperArm`, `Wing_L_ElbowThumb`, `Wing_L_Forearm`, 4 radiating wing-finger spars (`Wing_L_Spar1..4`, `shape: "cylinder"`), and 4-5 angled membrane panels between the spars.
-- 4 Muscular Clawed Legs (4 x 5-6 = 20-24 parts): `Thigh -> Shin -> Ankle -> Foot` with 3 curved conical talons per foot planted at `y=0`.
-- Whipping S-Curve Tail (8-12 parts): `Tail_Seg1..7` tapering backward (`-Z`) with a flared tail-spade or flame tip at the end.""",
+    "creature_dragon": """BLUEPRINT - DRAGON / WYVERN / WINGED BEAST, @LO@-@HI@ parts, built from Roblox blocks:
+- SILHOUETTE: wingspan 28-38 studs (X), length 26-34 studs (Z), commanding upright stance.
+- HEAD & NECK (20-26): blocky skull from stacked boxes (`Head_Snout`, `Head_Skull`), a hinged lower-jaw block with 6-8 small white tooth blocks, brow blocks, glowing eye blocks + pupils, 2 horns as 3-block tapering chains (`Horn_L_1..3`, `Horn_R_1..3`), and a neck chain `Neck_Seg1..4` with a spine block on each segment.
+- TORSO (14-18): chest block, 5-6 lighter belly scute plates, haunch blocks, dorsal spike blocks down the back.
+- WINGS (2 x 14-18): shoulder block, upper arm and forearm box chains, 4 long thin spar boxes fanning out (15 degree steps), and flat thin membrane plates (0.4-0.6 studs thick) filling the gaps between spars.
+- LEGS (4 x 5-6): Thigh -> Shin -> Ankle -> Foot blocks with 3 small claw blocks each, planted at y=0.
+- TAIL (8-12): `Tail_Seg1..7` shrinking blocks toward -Z, ending in a spade or flame cluster.""",
 
-    "creature_quad": """BLUEPRINT - QUADRUPED / APE / DINOSAUR / BEAST (gorilla, wolf, lion, bear, horse, unicorn, t-rex), @LO@-@HI@ parts:
-- Silhouette & Stance:
-  - If APE / GORILLA: Wide knuckle-walking or chest-beating stance (shoulders 14-18 studs wide across X, forward-tilted torso, massive articulated arms `Shoulder -> UpperArm -> Elbow -> HugeForearm -> KnuckleFist` touching `y=0` at `z=+5`, stout bent hind legs at `z=-4`, distinct lighter silverback saddle & chest pectorals).
-  - If BIPEDAL DINO (T-Rex / Raptor): Counter-balanced horizontal body (`Torso` at `y=10`, huge `Head/Jaws` with teeth at `z=+9, y=13`, long tapering `Tail_Seg1..6` at `z=-3..-16`, muscular 3-toed hind `Legs` touching `y=0`, small 2-clawed front `Arms`).
-  - If QUADRUPED (Wolf / Lion / Bear / Horse / Unicorn): Proud upright neck at `z=+6`, sculpted `Head_Cranium`, `Snout/Muzzle`, `LowerJaw`, `Nose`, 2 `Ears`, `Eyes + Pupils`, mane/antlers/horn, 3-part torso (`Chest`, `Ribcage`, `Pelvis`) with lighter underbelly, 4 articulated 4-segment legs at `[-X,+Z], [+X,+Z], [-X,-Z], [+X,-Z]` with paws/hooves + toes at `y=0`, and a 4-5 segment curved `Tail` at `-Z`.""",
+    "creature_quad": """BLUEPRINT - QUADRUPED / APE / DINOSAUR / BEAST (gorilla, wolf, lion, bear, horse, unicorn, t-rex), @LO@-@HI@ parts, built from Roblox blocks:
+- IF APE / GORILLA: wide knuckle-walking stance, shoulders 14-18 studs across X, a forward-leaning stepped torso, huge arm chains (`Arm_L_Seg1..4`: shoulder -> upper arm -> forearm -> fist block) touching y=0 at z=+5, stout bent hind legs at z=-4, a lighter silverback saddle and chest plates.
+- IF BIPEDAL DINO (T-Rex / Raptor): counter-balanced horizontal body (torso blocks at y=10), a big head block + jaw with tooth blocks at z=+9, `Tail_Seg1..6` tapering to z=-16, thick 3-toed hind legs touching y=0, tiny 2-claw arms.
+- IF QUADRUPED (wolf / lion / bear / horse / unicorn): a proud neck chain at z=+6, a blocky head (`Head_Cranium`, `Head_Muzzle`, `Head_Jaw`, `Nose`, 2 `Ear` blocks, `Eye` + `Pupil` blocks, mane/antlers/horn blocks), a 3-part torso (`Chest`, `Ribcage`, `Pelvis`) with a lighter underbelly, 4 legs as 4-block chains at [-X,+Z], [+X,+Z], [-X,-Z], [+X,-Z] with paw/hoof blocks at y=0, and a 4-5 block `Tail` at -Z.""",
 
-    "creature_bird": """BLUEPRINT - BIRD / PHOENIX / EAGLE / OWL / GRIFFIN, @LO@-@HI@ parts:
-- Body (12-16): Streamlined breast, layered chest plumage in a contrasting lighter colour, back, and angled rump (`rot: [25, 0, 0]`).
-- Head (16-20): Curved 3-part neck, rounded cranium (`sphere`), 2-part hooked or pointed beak (`Beak_Upper`, `Beak_Lower`, `cone`), expressive eyes + pupils + brow ridges, and 5-7 fanned head crest plumes.
-- Open Wings (2 x 20-26): Wide 30-stud wingspan along `-X` and `+X`! Each wing has a shoulder, 3-part leading-edge wing arm, and 3 layered rows of 6-8 overlapping feather blades fanned outward.
-- Fanned Tail & Talons (18-24): 7-9 fanned tail feathers at `-Z`, plus 2 articulated legs (`Thigh -> Shin -> 3 front toes + 1 rear talon`) gripping a sculpted perch or rock base.""",
+    "creature_bird": """BLUEPRINT - BIRD / PHOENIX / EAGLE / OWL / GRIFFIN, @LO@-@HI@ parts, built from Roblox blocks:
+- BODY (12-16): a stepped breast, layered chest plumage blocks in a lighter colour, back, and a rump block.
+- HEAD (16-20): a 3-block neck, a blocky head, a 2-part hooked beak (`Beak_Upper`, `Beak_Lower`), eye + pupil blocks, brow blocks, and 5-7 fanned crest blocks.
+- WINGS (2 x 20-26): wingspan about 30 studs along X. Each wing has a shoulder, a 3-block leading edge, and 3 rows of 6-8 overlapping flat feather blocks fanned outward in 15 degree steps.
+- TAIL & TALONS (18-24): 7-9 fanned tail feather blocks at -Z, and 2 legs (`Thigh -> Shin -> 3 toe blocks + 1 rear talon`) gripping a block perch or rock base.""",
 
-    "creature_aquatic": """BLUEPRINT - AQUATIC / SHARK / LEVIATHAN / SEA SERPENT / WHALE, @LO@-@HI@ parts:
-- Hydrodynamic Body (18-24): S-curving horizontal chain of 8-11 tapering `sphere`/`cylinder` segments (`Body_Seg1..9`, `smooth: 0.68`) along Z, widest at the chest and tapering cleanly to the caudal peduncle, with contrasting lighter belly counter-shading (`Belly_Seg1..6`).
-- Sculpted Head & Jaws (16-22): Pointed or rounded rostrum/snout, hinged lower jaw, rows of sharp conical teeth (`Tooth_1..8`), 3-4 gill slits on each side, glowing eyes + pupils, barbels or head crest.
-- Fins & Flukes (18-24): Tall swept dorsal fin (4-5 overlapping tapered pieces), secondary dorsal fin, 2 wide swept pectoral fins (`Fin_Pec_L1..3`, `Fin_Pec_R1..3`), pelvic fins, and a tall crescent upper/lower tail fluke.""",
+    "creature_aquatic": """BLUEPRINT - AQUATIC / SHARK / LEVIATHAN / SEA SERPENT / WHALE, @LO@-@HI@ parts, built from Roblox blocks:
+- BODY (18-24): a horizontal chain of 8-11 tapering box segments (`Body_Seg1..9`) along Z, widest at the chest and narrowing to the tail, with lighter belly blocks underneath (`Belly_Seg1..6`).
+- HEAD & JAWS (16-22): a pointed stepped snout, hinged lower-jaw block, rows of tooth blocks (`Tooth_1..8`), 3-4 gill slit blocks per side, eye + pupil blocks, a crest or barbels.
+- FINS (18-24): a tall dorsal fin from 4-5 stepped blocks, a secondary dorsal fin, 2 wide pectoral fins (`Fin_Pec_L1..3`, `Fin_Pec_R1..3`), pelvic fins, and a tall stepped tail fluke.""",
 
-    "humanoid": """BLUEPRINT - HUMANOID / CHARACTER / KNIGHT / MECH / ROBOT, @LO@-@HI@ parts, 16-22 studs tall (5-6 head-heights tall):
-- Head & Helmet/Hair (14-20): Sculpted cranium/head block, expressive face or glowing visor (`Eye_L`, `Eye_R` + pupils, brow, nose/mouth/mask), and multi-part helmet/crown/hood/hair built from 5-8 layered pieces.
-- Torso & Armor/Outfit (16-22): Broad chestplate/jacket, pectoral/core detail or glowing reactor, abs/waist, belt with buckle & pouches, left/right layered shoulder pauldrons (`Pauldron_L1..2`, `Pauldron_R1..2`), and cape/jetpack/backpack at `-Z`.
-- Articulated Posed Arms (2 x 8-10): Posed dynamically away from the torso (`Shoulder -> UpperArm -> Elbow -> AngledForearm -> Gauntlet -> Hand -> Fingers`), holding a detailed multi-part signature weapon, shield, or staff!
-- Heroic Stance Legs (2 x 8-10): Planted in a balanced wide stance (`Hip -> Thigh -> KneePad -> ShinGreave -> Ankle -> Boot + Sole`) touching `y=0`.""",
+    "humanoid": """BLUEPRINT - HUMANOID / CHARACTER / KNIGHT / MECH / ROBOT, @LO@-@HI@ parts, 16-22 studs tall (4-6 head-heights), classic chunky Roblox figure proportions:
+- HEAD & HELMET/HAIR (14-20): a block head, a face or glowing visor (`Eye_L`, `Eye_R` + pupils, brow, nose/mouth/mask), and a helmet/crown/hood/hair built from 5-8 layered blocks.
+- TORSO & OUTFIT (16-22): a broad chest block, core/pectoral detail or glowing reactor, waist, belt with buckle and pouches, layered shoulder pauldrons (`Pauldron_L1..2`, `Pauldron_R1..2`), and a cape/jetpack/backpack at -Z.
+- ARMS (2 x 8-10): posed away from the torso as chains (`Shoulder -> UpperArm -> Elbow -> Forearm -> Gauntlet -> Hand`), holding a multi-part signature weapon, shield or staff.
+- LEGS (2 x 8-10): a balanced wide stance (`Hip -> Thigh -> KneePad -> Shin -> Ankle -> Boot + Sole`) touching y=0.""",
 
-    "vehicle": """BLUEPRINT - VEHICLE (SPORTS CAR / TRUCK / AIRCRAFT / SPACESHIP / SHIP), @LO@-@HI@ parts:
+    "vehicle": """BLUEPRINT - VEHICLE (SPORTS CAR / TRUCK / AIRCRAFT / SPACESHIP / SHIP), @LO@-@HI@ parts, built from Roblox blocks:
 - IF WHEELED VEHICLE (CAR / SUPERCAR / TRUCK / TANK):
-  - Dimensions: Length along Z = 22-26 studs (front at +Z, rear at -Z), Width along X = 10-12 studs, Height along Y = 6.2-8.0 studs.
-  - 4 Round Wheels (4 x 5 = 20 parts): Placed at `[-4.8, 1.6, 6.8]`, `[4.8, 1.6, 6.8]`, `[-4.8, 1.7, -6.8]`, `[4.8, 1.7, -6.8]`. Every tire MUST be `"shape": "cylinder"`, `"size": [3.2, 1.3, 3.2]`, `"rot": [0, 0, 90]`, dark `#1e2226`, with a metallic rim (`size: [2.1, 1.4, 2.1]`, `rot: [0, 0, 90]`), hubcap, and brake caliper.
-  - Aerodynamic Body (34-44 parts): Front splitter (`y=0.7`), sloped hood (`rot: [12, 0, 0]`, `smooth: 0.35`), sculpted front/rear wheel-arch fenders, side skirts, side air intakes, raked windshield (`rot: [-32, 0, 0]`), low roof canopy, fastback rear glass/louvers (`rot: [24, 0, 0]`), doors + handles + wing mirrors.
-  - Front & Rear Details (20-26 parts): Front grille mesh, angled LED headlights, rear diffuser fins, quad exhaust pipes (`shape: "cylinder"`, `size: [0.55, 1.1, 0.55]`, `rot: [90, 0, 0]`), twin taillights, and a raised rear GT wing on 2 struts.
-- IF AIRCRAFT / JET / HELICOPTER / SPACESHIP:
-  - Tapered fuselage nose-to-tail along Z (`NoseCone` at +Z, `CockpitCanopy`, `MidFuselage`, `EngineNacelles`, `Afterburners` at -Z), wide swept main wings along `-X`/`+X` with ailerons/winglets/missiles or rotor blades, twin angled vertical tail stabilizers, and landing gear or display thruster stand.
-- IF SHIP / BOAT / SUBMARINE:
-  - Sculpted V-hull tapering to a sharp bow at `+Z` and stern at `-Z`, main deck planks, cabin/superstructure/bridge, masts + billowed sails or smokestacks/turrets, railings, and water-wave base.""",
+  - Dimensions: length along Z = 22-26 studs (front +Z, rear -Z), width along X = 10-12 studs, height along Y = 6.2-8.0 studs.
+  - 4 WHEELS (4 x 5 = 20 parts): at `[-4.8, 1.6, 6.8]`, `[4.8, 1.6, 6.8]`, `[-4.8, 1.7, -6.8]`, `[4.8, 1.7, -6.8]`. Every tire is `"shape": "cylinder"`, `"size": [3.2, 1.3, 3.2]`, `"rot": [0, 0, 90]`, dark `#1e2226`, plus a rim (`size: [2.1, 1.4, 2.1]`, `rot: [0, 0, 90]`), hubcap and brake caliper block.
+  - BODY (34-44, all blocks): front splitter, a hood as a block tilted 15 degrees (`rot: [15, 0, 0]`), wheel-arch fender blocks, side skirts, side intakes, a windshield block tilted -30 degrees, a low roof block, a fastback rear window tilted 30 degrees, doors + handles + mirror blocks.
+  - FRONT & REAR (20-26): grille blocks, headlight blocks, rear diffuser fins, quad exhaust pipes (`shape: "cylinder"`, `size: [0.55, 1.1, 0.55]`, `rot: [90, 0, 0]`), twin taillights, and a raised rear wing on 2 strut blocks.
+- IF AIRCRAFT / JET / HELICOPTER / SPACESHIP: a stepped tapered fuselage along Z (`NoseCone` at +Z, `Cockpit`, `MidFuselage`, `Engine` blocks, afterburners at -Z), wide swept main wing blocks along -X/+X with ailerons/winglets/missiles or rotor blades, twin vertical tail fins, and landing gear or a display stand.
+- IF SHIP / BOAT / SUBMARINE: a stepped V-hull of blocks narrowing to a bow at +Z, deck planks, cabin/bridge, masts + flat sail blocks or smokestacks/turrets, railings, and a flat water base.""",
 
-    "structure": """BLUEPRINT - ARCHITECTURAL STRUCTURE / CASTLE / COTTAGE / TOWER, @LO@-@HI@ parts:
-- Stepped Foundation (6-10): Stone plinth, courtyard base, entrance steps.
-- Framed Walls & Pillars (24-34): Corner stone quoins/timber posts, recessed wall panels, archways, timber cross-beams, and protruding stone/wood cornice bands.
-- Windows, Doors & Lighting (14-20): Recessed or proud (`+0.15` stud) glowing window panes with 4-part frames & sills, heavy arched door with iron hinges + handle, and hanging warm lanterns.
-- Multi-Tiered Angled Roof (18-26): Pitched roof slopes (`rot: [32, 0, 0]` / `[0, 0, 32]`), overhanging eaves, ridge beam, gable trim, dormer window, chimney with smoke puffs or turret spire.
-- Diorama Details (10-16): Stylized trees/bushes, cobblestone path, barrels/crates, banner flags.""",
+    "structure": """BLUEPRINT - ARCHITECTURAL STRUCTURE / CASTLE / COTTAGE / TOWER, @LO@-@HI@ parts, built from Roblox blocks:
+- STEPPED FOUNDATION (6-10): stone plinth, courtyard base, entrance steps.
+- WALLS & PILLARS (24-34): corner quoins/timber posts, recessed wall panels, arches built as stepped blocks, timber cross-beams, protruding cornice bands.
+- WINDOWS, DOORS & LIGHTS (14-20): proud (+0.15 stud) glowing window panes with 4-part frames and sills, a heavy door with hinge and handle blocks, hanging lanterns.
+- ROOF (18-26): pitched roof slopes as boxes tilted 30-45 degrees (`rot: [32, 0, 0]` / `[0, 0, 32]`), overhanging eaves, ridge beam, gable trim, dormer, chimney or turret spire.
+- DIORAMA (10-16): blocky trees/bushes, a cobblestone path, barrels/crates, banner flags.""",
 
-    "prop": """BLUEPRINT - DETAILED PROP / WEAPON / ARTIFACT / FURNITURE, @LO@-@HI@ parts:
-- Multi-layered core silhouette with bevelled edges (`smooth: 0.25-0.55`), distinct functional sub-assemblies (e.g. for a sword/weapon: pommel + gemstone, ribbed grip wrap, sculpted crossguard wings, central fuller ridge, multi-segment tapered blade edge, glowing runes, and a display pedestal; for a chest/prop: banded base, hinged lid, lockplate, corner brackets, rivets, and interior treasure/glow).""",
+    "prop": """BLUEPRINT - DETAILED PROP / WEAPON / ARTIFACT / FURNITURE, @LO@-@HI@ parts, built from Roblox blocks:
+- A layered silhouette of blocks with clear sub-assemblies (sword: pommel + gem, wrapped grip, crossguard wings, central fuller, multi-block tapered blade, glowing runes, display pedestal; chest: banded base, lid, lockplate, corner brackets, rivets, glowing treasure inside). Keep edges crisp; use `cylinder` only for truly round parts such as barrels or handles.""",
 
-    "plant": """BLUEPRINT - STYLIZED TREE / BOTANICAL DIORAMA / MUSHROOM, @LO@-@HI@ parts:
-- Grounded Base & Roots (8-12): Sculpted earth mound, 5-7 radiating root flares (`cone`/`cylinder`) gripping mossy rocks.
-- Twisting Tapered Trunk & Branches (16-24): 5-7 connected, slightly rotated trunk segments (`Trunk_Seg1..6`, `cylinder`, `smooth: 0.55`) splitting into 4-6 multi-segment spreading branches (`Branch_L1..3`, `Branch_R1..3`).
-- Lush Multi-Tone Canopy & Flora (36-52): 20-30 overlapping `sphere` foliage clusters in 3-4 harmonious greens/blossoms, plus hanging vines, glowing mushrooms, or fruit/flowers.""",
+    "plant": """BLUEPRINT - STYLIZED TREE / BOTANICAL DIORAMA / MUSHROOM, @LO@-@HI@ parts, built from Roblox blocks:
+- BASE & ROOTS (8-12): a stepped earth mound and 5-7 radiating root blocks gripping mossy rock blocks.
+- TRUNK & BRANCHES (16-24): 5-7 stacked trunk blocks (`Trunk_Seg1..6`, a cylinder only if it is a straight pillar-like trunk) splitting into 4-6 multi-block branches (`Branch_L1..3`, `Branch_R1..3`).
+- CANOPY & FLORA (36-52): 20-30 overlapping CUBE foliage blocks of different sizes in 3-4 harmonious greens/blossoms (stepped cloud shapes), plus hanging vine blocks, glowing mushroom caps built from stacked blocks, fruit or flowers (small spheres allowed for fruit only).""",
 }
 
-WINGS_BP = """WINGS ADD-ON: Build 2 large symmetrical wings spreading wide along -X and +X. Each wing has a shoulder joint, a 3-part leading-edge arm, and 2-3 rows of 6-8 fanned feather/membrane blades."""
+WINGS_BP = """WINGS ADD-ON: Build 2 large symmetrical wings spreading wide along -X and +X from block shoulders. Each wing has a shoulder block, a 3-block leading-edge arm, and 2-3 rows of 6-8 flat feather/membrane blocks fanned out in 15 degree steps."""
 
 KW = {
     "vehicle": r"\b(car|supercar|sportcar|sports car|hypercar|sedan|coupe|convertible|lamborghini|ferrari|porsche|bugatti|mclaren|mustang|camaro|corvette|gtr|supra|f1|formula|racecar|truck|pickup|lorry|bus|van|suv|jeep|hummer|limo|taxi|police car|ambulance|firetruck|tractor|motorcycle|motorbike|bike|bicycle|scooter|moped|atv|quad|tank|apc|humvee|train|locomotive|tram|subway|monorail|plane|airplane|biplane|airliner|fighter|jet|bomber|helicopter|chopper|drone|blimp|zeppelin|airship|rocket|spaceship|starship|spacecraft|shuttle|ufo|saucer|rover|lander|boat|ship|sailboat|yacht|speedboat|ferry|cruiser|battleship|carrier|submarine|sub|pirate ship|galleon|canoe|kayak|raft|jetski|hovercraft|sled|sleigh|chariot|wagon|cart|carriage|coach|rickshaw|kart|go-kart|buggy|forklift|bulldozer|excavator|crane|dump truck|cement mixer|combine|harvester|snowplow|snowmobile|segway|skateboard|hoverboard|rollercoaster)\b",
@@ -296,10 +295,10 @@ def build_user_prompt(prompt: str, cat: str, sub: str, lo: int, hi: int, web_ctx
         f'SUBJECT: "{prompt}"',
         f"CATEGORY: {cat}" + (f" ({sub})" if sub else ""),
         f"TARGET: {lo}-{hi} parts, longest side 24-45 studs.",
-        "First write the plan (signature features, 5 contrasting palette hex colors, exact proportions, section budgets), then build every section completely with clear 3D depth across X, Y, and Z. Make sure every chain segment (tentacles, arms, legs, tails, necks) physically overlaps its neighbour with zero gaps.",
+        "First write the plan: `reference` (what the REAL subject looks like), `must_have` (countable features), signature features, 5 contrasting palette hex colours, exact proportions, section budgets. Then build it as a ROBLOX model: mostly Block parts, curves made from stepped blocks, mostly axis-aligned, chunky sizes. Match the real subject's colours, limb/eye/horn counts and markings exactly. Every chain segment (tentacles, arms, legs, tails, necks) must physically overlap its neighbour with zero gaps.",
     ]
     if web_ctx:
-        out.append("REAL-WORLD REFERENCE (use for anatomy, proportions, and contrasting markings):\n" + web_ctx)
+        out.append("REFERENCE (copy the real design: colours, counts of limbs/eyes/horns, markings, accessories, proportions):\n" + web_ctx)
     return "\n".join(out)
 
 
@@ -317,6 +316,7 @@ def build_revision_prompt(prompt: str, cat: str, lo: int, hi: int, parts: List[D
         out.append(f'REQUESTED CHANGE FROM THE USER: "{change}"\nApply it faithfully and keep everything else.')
     if problems:
         out.append("PROBLEMS FOUND BY THE CHECKER - fix all of them:\n" + "\n".join("- " + m for m in problems))
+    out.append('Keep it Roblox-native: blocks first, curves as stepped blocks, mostly axis-aligned, no sphere bodies or heads. Keep the plan.must_have list and make sure every item exists.')
     out.append('Return the COMPLETE corrected build in the same JSON schema (plan + every op), never a diff.')
     return "\n".join(out)
 
@@ -614,7 +614,7 @@ async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
         bits += [o["snippet"] for o in (d.get("organic") or [])[:4] if o.get("snippet")]
         return bits
 
-    qs = [f"{query} anatomy proportions key parts colors", f"{query} distinctive visual features silhouette"]
+    qs = [f"{query} appearance colors key features", f"{query} character design markings silhouette", f"{query} roblox"]
     try:
         async with httpx.AsyncClient(timeout=8.5) as client:
             results = await asyncio.gather(*(one(client, q) for q in qs), return_exceptions=True)
@@ -784,25 +784,62 @@ _SHARP_PART = re.compile(r"blade|edge|sword|dagger|knife|axe|spear|spike|thorn|f
 _ORGANIC_BOX_TO_SPHERE = re.compile(r"mantle|head|cranium|skull|snout|muzzle|belly|chest|torso|abdomen|pelvis|rump|thigh|calf|shin|upperarm|forearm|shoulder|hip|knee|elbow|tentacle|arm_.*seg|leg_.*seg|tail_.*seg|neck_.*seg|fin_|suck|club|eye|pupil|brow|foliage|canopy|leaf|bush|cloud|cap|mushroom", re.I)
 
 
+_ROUND_EXEMPT = re.compile(r"eye|pupil|iris|orb|ball|pearl|gem|jewel|bead|knob|bubble|halo|lens|egg|berry|fruit|planet|globe", re.I)
+_SPIKE_OK = re.compile(r"spike|thorn|fang|tooth|talon|claw|horn|tusk|stinger", re.I)
+_RING_OK = re.compile(r"ring|halo|hoop|tire|tyre", re.I)
+_CYL_EXEMPT = re.compile(r"wheel|tire|tyre|rim|hub|axle|barrel|pipe|exhaust|column|pillar|trunk|wand|staff|handle|pole|post|"
+                         r"nozzle|thruster|cannon|muzzle|suck|candle|lamp|chimney|spar|grip|hilt", re.I)
+
+
 def heal_part_shape_and_smoothness(pid: str, shape: str, size: List[float], smooth: float, cat: str, sub: str) -> Tuple[str, float]:
-    """Ensures organic creature/character/plant parts are smooth & sculpted rather than flat-shaded sharp boxes."""
-    is_sharp = bool(_SHARP_PART.search(pid))
-    if cat in ("creature", "plant") and shape == "box" and not is_sharp:
-        if re.search(r"mantle|fin_|suck|club|eye|pupil|foliage|canopy|bush|berry", pid, re.I):
-            shape = "sphere"
-            smooth = max(smooth, 0.68)
-        elif _ORGANIC_BOX_TO_SPHERE.search(pid):
-            smooth = max(smooth, 0.42)
-        else:
-            smooth = max(smooth, 0.28)
-    elif cat == "humanoid" and not is_sharp:
-        smooth = max(smooth, 0.26 if shape == "box" else 0.55)
-    elif cat == "vehicle" and not is_sharp:
-        if re.search(r"hood|roof|fender|bumper|body|cabin|canopy|door|nose|fuselage|hull", pid, re.I):
-            smooth = max(smooth, 0.34)
-    if shape in ("sphere", "cylinder", "cone", "torus") and not is_sharp:
-        smooth = max(smooth, SMOOTH_DEFAULT[shape])
-    return shape, min(1.0, smooth)
+    """Roblox shape policy: Blocks first. Stray spheres/cones/tori become Blocks; smoothness is only a tiny bevel."""
+    longest = max(size)
+    if shape == "sphere":
+        if not (_ROUND_EXEMPT.search(pid) and longest <= 3.6):
+            shape = "box"
+    elif shape == "cone":
+        if not (_SPIKE_OK.search(pid) and longest <= 2.6):
+            shape = "box"
+    elif shape == "torus":
+        if not _RING_OK.search(pid):
+            shape = "box"
+    if shape == "box":
+        smooth = min(smooth, 0.08)
+    elif shape == "cylinder":
+        smooth = min(smooth, 0.25)
+    return shape, max(0.0, min(1.0, smooth))
+
+
+def enforce_roblox_budget(parts: List[Dict[str, Any]], cat: str) -> int:
+    """Keep the shape mix Roblox-like: round things only where a builder would really use them."""
+    n = len(parts)
+    if n < 8:
+        return 0
+    changed = 0
+    round_idx = sorted((i for i, p in enumerate(parts) if p["shape"] in ("sphere", "cone", "torus")),
+                       key=lambda i: (bool(_ROUND_EXEMPT.search(parts[i]["id"])), -vol(parts[i])))
+    cap_round = max(4, int(0.10 * n))
+    for i in round_idx[: max(0, len(round_idx) - cap_round)]:
+        parts[i]["shape"] = "box"
+        parts[i]["smooth"] = min(parts[i]["smooth"], 0.08)
+        changed += 1
+    if cat in ("creature", "humanoid", "plant"):
+        cyl = sorted((i for i, p in enumerate(parts) if p["shape"] == "cylinder" and not _CYL_EXEMPT.search(p["id"])),
+                     key=lambda i: -vol(parts[i]))
+        cap_cyl = max(2, int(0.15 * n))
+        for i in cyl[cap_cyl:]:
+            parts[i]["shape"] = "box"
+            parts[i]["smooth"] = min(parts[i]["smooth"], 0.08)
+            changed += 1
+    return changed
+
+
+def _snap_q(v: float, q: float = 0.25) -> float:
+    return round(v / q) * q
+
+
+def _snap_rot(a: float) -> float:
+    return _wrap_deg(round(a / 15.0) * 15.0)
 
 
 def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#8fe3a9",
@@ -833,11 +870,14 @@ def normalize_ops(raw_ops: List[Any], unit: float = 1.0, default_color: str = "#
             pos = [max(-90.0, min(90.0, v * unit)) for v in _vec3(rp, (0, 0, 0))]
         else:
             pos = [0.0, size[1] / 2, 0.0]
-        rot = [_wrap_deg(r) for r in _vec3(item.get("rot") or item.get("rotation") or item.get("ro"), (0, 0, 0))]
+        rot = [_snap_rot(r) for r in _vec3(item.get("rot") or item.get("rotation") or item.get("ro"), (0, 0, 0))]
 
         smooth = max(0.0, min(1.0, _num(item.get("smooth"), SMOOTH_DEFAULT[shape])))
         shape, smooth = heal_part_shape_and_smoothness(pid, shape, size, smooth, cat, sub)
         size, rot = fix_cylinder_axes(pid, shape, size, rot)
+        if shape == "box" and all(abs(((r + 45.0) % 90.0) - 45.0) < 0.6 for r in rot):
+            size = [max(0.25, _snap_q(s)) for s in size]
+            pos = [_snap_q(v) for v in pos]
 
         color = str(item.get("color") or item.get("c") or default_color).strip()
         if re.fullmatch(r"#[0-9a-fA-F]{3}", color):
@@ -1172,9 +1212,15 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
         add("PALETTE_LOW", f"only {len(cols)} colour(s); use 4-6 contrasting colours so details pop.", True, 12)
 
     tilted = sum(1 for p in parts if any(abs(r) > 2 for r in p["rot"]))
-    if cat in ("creature", "humanoid", "plant") and n >= 40 and tilted / n < 0.08:
-        add("BOXY", f"only {tilted} of {n} parts are tilted; build necks, tails, tentacles, and limbs as rotated chains.",
-            cat == "creature", 10 if cat == "creature" else 4)
+    tilt_share = tilted / max(n, 1)
+    box_n = sum(1 for p in parts if p["shape"] == "box")
+    block_share = box_n / max(n, 1)
+    if n >= 30 and tilt_share > 0.40:
+        add("TILTED", f"{tilted} of {n} parts ({tilt_share * 100:.0f}%) are rotated. Roblox builds stay mostly axis-aligned: rebuild straight sections with rot [0,0,0] using stepped blocks, and keep tilts (15 degree steps) for slopes, wings, tails and bent limb segments only.",
+            tilt_share > 0.55, 12 if tilt_share > 0.55 else 6)
+    if n >= 30 and block_share < 0.62:
+        add("ROUNDED", f"only {block_share * 100:.0f}% of parts are blocks. Rebuild heads, bodies, limbs and fins from box parts and stepped blocks; keep spheres for eyes and gems only.",
+            True, 12)
 
     score = max(0, int(round(score)))
     grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D"
@@ -1186,7 +1232,7 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
             "overlap_check": overlap_msg,
             "proportion_check": prop_msg,
             "floating_check": float_msg,
-            "detail_check": f"{n} parts (target {lo}-{hi}), {tilted / max(n, 1) * 100:.0f}% tilted pieces, {len(cols)} colours.",
+            "detail_check": f"{n} parts (target {lo}-{hi}), {block_share * 100:.0f}% blocks, {tilt_share * 100:.0f}% tilted, {len(cols)} colours.",
         },
     }
 
@@ -1200,6 +1246,7 @@ def process_build(data: Dict[str, Any], cat: str, sub: str, lo: int, hi: int, pr
     parts = normalize_ops(raw, unit, base if re.fullmatch(r"#[0-9a-fA-F]{6}", base) else "#8fe3a9", cat, sub)
     if len(parts) < 3:
         raise ValueError("The AI returned fewer than 3 usable parts.")
+    enforce_roblox_budget(parts, cat)
     parts = dedupe(parts)
     frame(parts)
     stitched = stitch_articulated_chains(parts)
@@ -1400,7 +1447,7 @@ async def test_key(req: TestKeyRequest):
         try:
             if prov == "serper":
                 res = await client.post(
-                    "[https://google.serper.dev/search](https://google.serper.dev/search)",
+                    "https://google.serper.dev/search",
                     headers={"X-API-KEY": key, "Content-Type": "application/json"},
                     json={"q": "3D low poly model", "num": 1},
                 )
@@ -1410,7 +1457,7 @@ async def test_key(req: TestKeyRequest):
             if prov == "gemini":
                 m = normalize_gemini_model(model or "gemini-3.8-flash")
                 res = await client.post(
-                    f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
                     headers={"x-goog-api-key": key},
                     json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}},
                 )
@@ -1418,7 +1465,7 @@ async def test_key(req: TestKeyRequest):
                     raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
                 return {"ok": True, "message": f"Gemini verified ({m})!"}
             if prov in ("openai", "groq"):
-                base = "[https://api.openai.com/v1](https://api.openai.com/v1)" if prov == "openai" else "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
+                base = "https://api.openai.com/v1" if prov == "openai" else "https://api.groq.com/openai/v1"
                 m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
                 payload: Dict[str, Any] = {"model": m, "messages": [{"role": "user", "content": "OK"}]}
                 payload["max_completion_tokens" if _is_reasoning(m) else "max_tokens"] = 64 if _is_reasoning(m) else 10
@@ -1428,7 +1475,7 @@ async def test_key(req: TestKeyRequest):
                 await _post_healing(
                     client,
                     "anthropic",
-                    "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)",
+                    "https://api.anthropic.com/v1/messages",
                     {"x-api-key": key, "anthropic-version": "2023-06-01"},
                     {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]},
                 )
@@ -1444,7 +1491,7 @@ async def test_key(req: TestKeyRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v13", "providers": [k for k, v in ENV_KEYS.items() if v],
+    return {"status": "healthy", "version": "v14", "providers": [k for k, v in ENV_KEYS.items() if v],
             "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS}
 
 
