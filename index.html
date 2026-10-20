@@ -1062,7 +1062,7 @@ async function fetchWebResearch(query){
 
 /* Runs a server job: start it, then poll. No single request ever waits longer than a few seconds,
    so proxies and browsers cannot time it out. Returns null only when the server is not reachable. */
-async function runJob(path,body,{maxMs=300000,label=''}={}){
+async function runJob(path,body,{maxMs=230000,label=''}={}){
  if(location.protocol==='file:')return null;
  let jid;
  try{
@@ -1072,6 +1072,10 @@ async function runJob(path,body,{maxMs=300000,label=''}={}){
   jid=(await r.json()).job_id;
  }catch(e){if(e&&e.code&&e.code!=='net')throw e;return null}
  const t0=Date.now();let since=0,bad=0;
+ const live=document.createElement('div');live.className='live';
+ const paintLive=(txt,el)=>{live.textContent='⏳ '+(txt||'Waiting for the AI…')+' · '+Math.round(el/1000)+'s';live.remove();$('#steps').appendChild(live);$('#steps').scrollTop=1e9};
+ paintLive('',0);
+ try{
  for(;;){
   await sleep(1100);
   const el=Date.now()-t0;
@@ -1089,10 +1093,12 @@ async function runJob(path,body,{maxMs=300000,label=''}={}){
   }
   since=j.next||since;
   (j.steps||[]).forEach(x=>step(x.msg,x.kind||''));
+  paintLive(j.live,el);
   progSet(Math.min(92,8+el/1000*1.4));
   if(j.status=='done')return j.result;
   if(j.status=='error')throw srvErr(j.error&&j.error.status||500,j.error&&j.error.detail||'');
  }
+ }finally{live.remove()}
 }
 function srvErr(status,detail){
  const s=Number(status)||500;
