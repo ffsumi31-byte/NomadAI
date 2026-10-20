@@ -113,6 +113,9 @@ h2::before{content:"";width:5px;height:24px;border-radius:3px;background:var(--g
 @keyframes pulse{50%{opacity:.3}}
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--gh);background:var(--tint);border:1px solid var(--gl);border-radius:5px;padding:3px 10px;margin-bottom:16px}.badge .ico{width:14px;height:14px}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:26px 0}
+.memh{margin-top:38px}.memc{font-size:15px;font-weight:500;color:var(--mut)}
+.memtools{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}.memtools input{flex:1;min-width:200px;font:inherit;padding:10px 12px;border:1px solid var(--ln);border-radius:6px;background:#fff;color:var(--ink)}
+.memempty{grid-column:1/-1;color:var(--mut);font-size:14px;padding:18px 4px}
 .tile{text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .3s var(--ease),border-color .25s var(--ease)}
 .tile:hover{transform:translateY(-2px);border-color:var(--g)}
 .tile .ic{width:38px;height:38px;border-radius:6px;background:var(--tint);display:grid;place-items:center;margin-bottom:12px;color:var(--g);transition:background .25s var(--ease),color .25s var(--ease)}
@@ -442,6 +445,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
  </select>
  <label class="ck"><input type="checkbox" id="auto-revise" checked>Auto-revise quality</label>
  <label class="ck"><input type="checkbox" id="tonal-var" checked>Tonal variation</label>
+ <label class="ck" title="Your finished model is saved so other people who type the same prompt get it instantly, with no AI cost."><input type="checkbox" id="publish-mem" checked>Share to global memory</label>
 </div>
 <div class="row"><label class="ck"><input type="checkbox" id="keep">Add to current model</label><label class="ck"><input type="checkbox" id="use-serper" checked>Use Serper web search</label><span class="sp"></span><button class="btn pri" id="build">Build with AI</button></div>
 <div class="rev-box" id="rev-box">
@@ -456,7 +460,10 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
 <div id="plist"></div><div class="row" style="margin-top:10px"><button class="btn sm" id="undo"><span data-i="undo"></span>Undo</button><button class="btn sm" id="clear">Clear all</button></div></div>
 <div class="card" id="insp"></div></div><div id="slot-parts"></div></div></section>
 
-<section class="page" id="p-library"><h2>Library</h2><p class="sub">Pick a ready-made model. It opens in Parts so you can change anything.</p><div class="grid3 stag" id="lib"></div></section>
+<section class="page" id="p-library"><h2>Library</h2><p class="sub">Pick a ready-made model. It opens in Parts so you can change anything.</p><div class="grid3 stag" id="lib"></div>
+<h2 class="memh">Global memory <span class="memc" id="mem-count"></span></h2><p class="sub">Models built by everyone. Opening one costs no AI call.</p>
+<div class="memtools"><input id="mem-q" type="search" placeholder="Search saved prompts…" autocomplete="off"><button class="btn" id="mem-sort" type="button">Most used</button></div>
+<div class="grid3" id="memlib"><div class="memempty">Loading…</div></div></section>
 <section class="page" id="p-pricing"><div class="stag"><div><h2>Simple pricing</h2><p class="sub">Start free and upgrade when you need more AI builds. Plan names, prices and limits here are placeholders you can change.</p>
 <div class="tog" id="tog"><button class="on" data-b="m">Monthly</button><button data-b="y">Yearly<small>−25%</small></button><i></i></div></div>
 <div class="plans stag">
@@ -732,10 +739,9 @@ const PV={
 
 function normalizeGeminiBrowserModel(m){
  m=String(m||'gemini-3.8-flash').trim().toLowerCase().replace(/^models\//,'');
- if(m.includes('argon')||m.includes('4'))return'gemini-4-argon';
- if(m.includes('lite'))return'gemini-3.5-flash-lite';
- if(/2\.5|2\.0|1\.5|3\.7|3\.6|3\.5-flash$/.test(m))return'gemini-3.8-flash';
- return m||'gemini-3.8-flash';
+ if(m.includes('argon'))return'gemini-4-argon';
+ if(/^gemini-(1\.5|2\.0|2\.5)/.test(m)&&!m.includes('lite'))return'gemini-3.8-flash'; /* retired ids only */
+ return m||'gemini-3.8-flash'; /* keep exactly what the user picked */
 }
 
 function detectProviderFromKey(k){
@@ -1054,45 +1060,62 @@ async function fetchWebResearch(query){
  return '';
 }
 
-async function askServerGenerate(rawQuery,webContext,llm){
+/* Runs a server job: start it, then poll. No single request ever waits longer than a few seconds,
+   so proxies and browsers cannot time it out. Returns null only when the server is not reachable. */
+async function runJob(path,body,{maxMs=300000,label=''}={}){
  if(location.protocol==='file:')return null;
- const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),175000);
+ let jid;
  try{
-  const body={
-   prompt:rawQuery,
-   web_context:webContext||'',
-   use_serper:$('#use-serper').checked,
-   provider:llm||'',
-   model:llm?mod(llm):'',
-   api_key:llm?AI.key[llm]:'',
-   serper_key:readySerper(),
-   category:$('#cat-sel').value||'',
-   revise:$('#auto-revise').checked,
-   tonal_variation:$('#tonal-var').checked
-  };
-  const r=await fetch('/generate',{
-   method:'POST',
-   headers:{'Content-Type':'application/json'},
-   signal:ctl.signal,
-   body:JSON.stringify(body)
-  });
-  clearTimeout(tm);
-  if(!r.ok){
-   let detail='';
-   try{const ej=await r.json();detail=ej.detail||''}catch(_){}
-   if(r.status==401||r.status==403||r.status==429||r.status==422){
-    throw{code:r.status==429?'rate_limited':(r.status==401||r.status==403)?'badkey':'api',status:r.status,msg:detail};
-   }
-   return null;
+  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.status==404||r.status==405)return null;
+  if(!r.ok){let d='';try{d=(await r.json()).detail||''}catch(_){}throw srvErr(r.status,d)}
+  jid=(await r.json()).job_id;
+ }catch(e){if(e&&e.code&&e.code!=='net')throw e;return null}
+ const t0=Date.now();let since=0,bad=0;
+ for(;;){
+  await sleep(1100);
+  const el=Date.now()-t0;
+  if(el>maxMs)throw{code:'timeout'};
+  let j;
+  try{
+   const r=await fetch('/jobs/'+jid+'?since='+since);
+   if(r.status==404)throw srvErr(404,'The build was lost (the server restarted). Try again.');
+   if(!r.ok)throw{code:'net'};
+   j=await r.json();bad=0;
+  }catch(e){
+   if(e&&e.code&&e.code!=='net')throw e;
+   if(++bad>=6)throw{code:'net'};
+   continue;
   }
-  const j=await r.json();
-  if(j&&Array.isArray(j.ops)&&j.ops.length)return JSON.stringify(j);
-  return null;
- }catch(e){
-  clearTimeout(tm);
-  if(e&&e.code&&e.code!=='net')throw e;
-  return null;
+  since=j.next||since;
+  (j.steps||[]).forEach(x=>step(x.msg,x.kind||''));
+  progSet(Math.min(92,8+el/1000*1.4));
+  if(j.status=='done')return j.result;
+  if(j.status=='error')throw srvErr(j.error&&j.error.status||500,j.error&&j.error.detail||'');
  }
+}
+function srvErr(status,detail){
+ const s=Number(status)||500;
+ return{code:s==401||s==403?'badkey':s==404?'nomodel':s==429?'rate_limited':s==504?'timeout':s==422?'empty':'api',status:s,msg:String(detail||'').slice(0,260)};
+}
+
+async function askServerGenerate(rawQuery,webContext,llm){
+ const res=await runJob('/jobs/generate',{
+  prompt:rawQuery,
+  web_context:webContext||'',
+  use_serper:$('#use-serper').checked,
+  provider:llm||'',
+  model:llm?mod(llm):'',
+  api_key:llm?AI.key[llm]:'',
+  serper_key:readySerper(),
+  category:$('#cat-sel').value||'',
+  revise:$('#auto-revise').checked,
+  tonal_variation:$('#tonal-var').checked,
+  use_memory:true,
+  publish:$('#publish-mem').checked
+ });
+ if(res&&Array.isArray(res.ops)&&res.ops.length)return JSON.stringify(res);
+ return null;
 }
 
 async function askBuiltInCloudAI(fullPrompt,rawQuery){
@@ -1123,6 +1146,7 @@ async function askAI(rawQuery,webContext){
  const llm=readyLLM();
  const viaServer=await askServerGenerate(rawQuery,webContext,llm);
  if(viaServer)return viaServer;
+ if(serverHealth.online)throw{code:'api',msg:'The Verdant server returned no model. Check the server log on Render.'};
 
  const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate structure and colors): '+webContext:'');
  if(llm){
@@ -1150,11 +1174,19 @@ function parseAIResponse(text){
   quality:j.quality||null,
   plan:j.plan||null,
   engine:j.engine||null,
+  memory:j.memory||null,
   used_serper:!!j.used_serper
  };
 }
 
 function renderDiagnostics(parsed){
+ const m=parsed.memory;
+ if(m){
+  if(m.source=='memory')step('♻ Loaded from global memory'+(m.uses?' (used '+m.uses+'×)':'')+' - no AI call, no API cost'+(m.base_prompt?' · saved prompt: "'+m.base_prompt+'"':''),'ok');
+  else if(m.source=='variant')step('🧬 Rebuilt a new variant of "'+m.base_prompt+'"'+(m.added&&m.added.length?' with: '+m.added.join(', '):'')+(m.saved?' · published to global memory':''),'ok');
+  else if(m.source=='fresh'&&m.saved)step('🌍 Published to global memory ('+m.total_models+' models shared)','ok');
+  if(m.saved)loadMemoryLib(true);
+ }
  if(parsed.used_serper)step('🌐 Live Serper anatomical research applied','ok');
  if(parsed.engine&&parsed.engine.provider){
   step('🤖 Engine: '+parsed.engine.provider+' ('+(parsed.engine.model||'')+')');
@@ -1223,21 +1255,18 @@ async function reviseModel(){
  try{
   step('Revising model ('+parts.size+' parts): "'+instruction+'"…');
   const currentOps=exportCurrentOps();
-  const r=await api('/revise',{
-   method:'POST',
-   headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({
-    instruction,
-    ops:currentOps,
-    prompt:lastBuildMeta.prompt||$('#prompt').value.trim()||'the current model',
-    category:$('#cat-sel').value||lastBuildMeta.category||'',
-    scene_scale:lastBuildMeta.scene_scale||0.28,
-    provider:llm||'',
-    model:llm?mod(llm):'',
-    api_key:llm?AI.key[llm]:'',
-    tonal_variation:$('#tonal-var').checked
-   })
-  },165000);
+  const r=await runJob('/jobs/revise',{
+   instruction,
+   ops:currentOps,
+   prompt:lastBuildMeta.prompt||$('#prompt').value.trim()||'the current model',
+   category:$('#cat-sel').value||lastBuildMeta.category||'',
+   scene_scale:lastBuildMeta.scene_scale||0.28,
+   provider:llm||'',
+   model:llm?mod(llm):'',
+   api_key:llm?AI.key[llm]:'',
+   tonal_variation:$('#tonal-var').checked
+  });
+  if(!r)throw{code:'net'};
   const parsed=parseAIResponse(JSON.stringify(r));
   lastBuildMeta.category=parsed.category||lastBuildMeta.category;
   if(parsed.stats&&parsed.stats.scene_scale)lastBuildMeta.scene_scale=parsed.stats.scene_scale;
@@ -1273,6 +1302,44 @@ Object.entries(TPL).forEach(([n,[ic,rows]])=>{const b=document.createElement('bu
  b.children[0].innerHTML=ico(ic);b.children[1].textContent=n;b.children[2].textContent=rows.length+' parts · open in Parts';
  b.onclick=async()=>{wipe();go('parts');await runOps(rows.map(([k,s,p,c],i)=>({op:'add',id:k+'_'+(i+1),shape:k,size:s,pos:p,color:c,smooth:.06})));snap();toast(n+' is ready to edit')};$('#lib').appendChild(b)});
 
+/* ═══ Global memory library ═══ */
+let memSort='popular',memTimer=0,memLoaded=false;
+async function loadMemoryLib(force){
+ const box=$('#memlib');if(!box||location.protocol==='file:')return;
+ if(memLoaded&&!force&&!$('#mem-q').value)return;
+ try{
+  const j=await api('/memory?sort='+memSort+'&limit=60&q='+encodeURIComponent($('#mem-q').value.trim()),{},15000);
+  memLoaded=true;
+  $('#mem-count').textContent=j.total?'· '+j.total+' model'+(j.total==1?'':'s'):'';
+  box.innerHTML='';
+  if(!j.items.length){box.innerHTML='<div class="memempty">Nothing here yet. Build something with “Share to global memory” on and it appears here for everyone.</div>';return}
+  j.items.forEach(it=>{
+   const b=document.createElement('button');b.className='card tile';b.innerHTML='<div class="ic"></div><b></b><span></span>';
+   b.children[0].innerHTML=ico('box');
+   b.children[1].textContent=it.title||it.prompt;
+   b.children[2].textContent=it.parts+' parts · used '+it.uses+'×'+(it.parent_id?' · variant':'');
+   b.title=it.prompt;
+   b.onclick=()=>openMemoryModel(it);
+   box.appendChild(b);
+  });
+ }catch(e){box.innerHTML='<div class="memempty">Global memory is not reachable right now.</div>'}
+}
+async function openMemoryModel(it){
+ if(busy)return;
+ try{
+  toast('Opening “'+(it.title||it.prompt)+'”…');
+  const r=await api('/memory/'+encodeURIComponent(it.id)+'?tonal='+($('#tonal-var').checked?'true':'false'),{},30000);
+  const parsed=parseAIResponse(JSON.stringify(r));
+  wipe();go('parts');
+  lastBuildMeta={prompt:it.prompt,category:parsed.category||'',scene_scale:(parsed.stats&&parsed.stats.scene_scale)||0.28};
+  await runOps(parsed.ops);snap();
+  toast('Loaded from global memory - no AI call');
+  loadMemoryLib(true);
+ }catch(e){toast('Could not open that model')}
+}
+$('#mem-q').addEventListener('input',()=>{clearTimeout(memTimer);memTimer=setTimeout(()=>loadMemoryLib(true),300)});
+$('#mem-sort').onclick=e=>{memSort=memSort=='popular'?'new':'popular';e.currentTarget.textContent=memSort=='popular'?'Most used':'Newest';loadMemoryLib(true)};
+
 /* ═══ Result card + navigation ═══ */
 $$('[data-v]').forEach(b=>b.onclick=()=>{const[a,e]=b.dataset.v.split(',').map(Number);spin=false;$('#spin').classList.remove('on');view.az=a;view.el=e});
 $('#spin').onclick=e=>{spin=!spin;e.currentTarget.classList.toggle('on',spin)};
@@ -1282,7 +1349,7 @@ st.onpointermove=e=>{if(!drag)return;view.az-=(e.clientX-drag[0])*.008;view.el=M
 st.onpointerup=()=>{drag=null;st.style.cursor=''};
 function navInd(){const on=$('.nav button.on'),ind=$('.nav-ind');if(!on||!ind)return;ind.style.transform='translateY('+on.offsetTop+'px)';ind.style.height=on.offsetHeight+'px';requestAnimationFrame(()=>requestAnimationFrame(()=>ind.classList.remove('n')))}
 function go(n){$$('.page').forEach(p=>p.classList.toggle('on',p.id=='p-'+n));$$('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.go==n));navInd();
- BG.dataset.page=n;
+ BG.dataset.page=n;if(n=='library')loadMemoryLib();
  const sl=$('#slot-'+n),rc=$('#rc');(sl||$('#park')).appendChild(rc);if(sl){rc.classList.remove('in');void rc.offsetWidth;rc.classList.add('in')}
  $$('#p-'+n+' .stag>*').forEach((c,i)=>{c.style.animation='none';void c.offsetWidth;c.style.animation='';c.style.animationDelay=i*70+'ms'});scrollTo(0,0)}
 $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
