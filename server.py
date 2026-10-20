@@ -1,5 +1,13 @@
 """
-Verdant 3D - Roblox-native multi-AI backend (v19 - Multi-Slab Brick Sculptor & Hollow-Jaw Face Engine)
+Verdant 3D - Roblox-native multi-AI backend (v20 - Global Memory, background jobs, timeout fixes)
+
+v20 on top of v19:
+- GLOBAL MEMORY: every finished build is saved (SQLite). Same prompt again = served from memory, zero AI calls.
+  Near-identical prompt ("a giant squid with cartoony head") = the AI re-sculpts the saved model differently,
+  and the new version is published to the memory too.
+- Background jobs (/jobs/generate, /jobs/{id}) so slow Gemini builds never hit the proxy/browser time-out.
+- httpx time-outs are caught (no more bare 500s), Gemini has a total deadline, and the model you pick is respected.
+- Fixed broken markdown URLs in /test-key, wrong auto-classification ("giant" = humanoid), forced dark palette on non-apes.
 
 Upgrades in v19:
 1. Automatic Monolith-to-Multi-Slab Sculptor (subdivide_monoliths_into_slabs):
@@ -22,7 +30,10 @@ import json
 import math
 import os
 import re
+import sqlite3
+import threading
 import time
+import uuid
 import zlib
 from collections import OrderedDict
 from pathlib import Path
@@ -35,7 +46,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor Backend (v19)")
+app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor Backend (v20)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -45,7 +56,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "gemini-3.8-flash")
-THINKING_LEVEL = os.getenv("THINKING_LEVEL", "medium").lower().strip()
+THINKING_LEVEL = os.getenv("THINKING_LEVEL", "low").lower().strip()
+GEMINI_TOTAL_S = float(os.getenv("GEMINI_TOTAL_S", "150"))   # whole Gemini chain, all models
+GEMINI_CALL_S = float(os.getenv("GEMINI_CALL_S", "110"))     # one Gemini request
+GEMINI_MAX_OUT = int(os.getenv("GEMINI_MAX_OUT", "24576"))
+JOB_MAX_S = float(os.getenv("JOB_MAX_S", "260"))             # hard cap for one background build
 
 DEFAULT_MODELS = {
     "gemini": AI_MODEL,
@@ -173,6 +188,14 @@ MULTI-SLAB ROBLOX SCULPTING LAWS (FOLLOW STRICTLY):
 5. CRISP STUDIO EDGES (`smooth: 0.06`):
    - Keep `"smooth": 0.05` to `0.08` on all blocks so Three.js renders crisp, faceted Roblox Studio brick edges instead of puffy pillows!"""
 
+_i2 = CORE_SKILL.index("2. HOLLOW-FRAME ROARING FACE")
+_i5 = CORE_SKILL.index("5. CRISP STUDIO EDGES")
+FIGURE_LAWS = CORE_SKILL[_i2:_i5]          # face / shoulder-fur / crown / cuff rules: apes, bosses, humanoids only
+CORE_SKILL = (CORE_SKILL[:_i2]
+              + "2. FOLLOW THE BLUEPRINT FOR THIS SUBJECT. Use only the features the real subject has - never add crowns, "
+                "golden bracers, shoulder fur or a roaring mouth unless the subject or blueprint calls for them.\n"
+              + CORE_SKILL[_i5:].replace("5. CRISP STUDIO EDGES", "3. CRISP STUDIO EDGES"))
+
 BLUEPRINTS = {
     "creature_quad": """BLUEPRINT - STUDIO BOSS APE / GORILLA / QUADRUPED / BEAST, @LO@-@HI@ parts, built from stepped multi-slab Roblox bricks (`smooth: 0.06`):
 - IF GORILLA / APE / KING KONG / YETI / TROLL:
@@ -262,6 +285,17 @@ AIR_SEA_KW = r"\b(plane|airplane|biplane|jet|fighter|helicopter|chopper|drone|bl
 BIG_VEHICLE_KW = r"\b(truck|pickup|lorry|semi|bus|van|suv|jeep|hummer|tractor|train|locomotive|tank|apc|rv|camper|forklift|bulldozer|excavator|crane|dump truck|cement mixer|combine|harvester|monster truck)\b"
 
 
+KW["humanoid"] = KW["humanoid"].replace("|giant|", "|").replace("|boss|", "|")
+ANIMAL_KW = (r"\b(gorilla|ape|apes|monkey|chimp|chimpanzee|baboon|orangutan|kong|yeti|bigfoot|sasquatch|goat|sheep|ram|"
+             r"cow|bull|ox|buffalo|bison|pig|boar|horse|pony|donkey|zebra|giraffe|camel|llama|alpaca|deer|moose|elk|"
+             r"reindeer|antelope|rhino|rhinoceros|hippo|hippopotamus|elephant|mammoth|bear|panda|wolf|dog|puppy|fox|"
+             r"coyote|cat|kitten|lion|tiger|leopard|cheetah|panther|lynx|hyena|rabbit|bunny|hare|squirrel|mouse|rat|"
+             r"hamster|beaver|raccoon|skunk|badger|kangaroo|koala|sloth|armadillo|hedgehog|bat|"
+             r"dinosaur|dino|trex|t-rex|raptor|velociraptor|triceratops|stegosaurus|crocodile|alligator|gator|lizard|"
+             r"gecko|iguana|komodo|snake|cobra|python|anaconda|viper|turtle|tortoise|frog|toad|"
+             r"cerberus|griffin|chimera|manticore|sphinx|unicorn|werewolf)\b")
+
+
 def classify(prompt: str, hint: str = "") -> Tuple[str, str, bool, bool]:
     p, hint = prompt.lower(), (hint or "").lower().strip()
     matched = True
@@ -269,6 +303,8 @@ def classify(prompt: str, hint: str = "") -> Tuple[str, str, bool, bool]:
         cat = hint
     else:
         if any(re.search(SUB_KW[s], p) for s in ("dragon", "multi", "bird", "aquatic")):
+            cat = "creature"
+        elif re.search(ANIMAL_KW, p):
             cat = "creature"
         else:
             cat = next((c for c in ("vehicle", "structure", "humanoid", "plant", "prop") if re.search(KW[c], p)), None)
@@ -291,7 +327,8 @@ def part_range(cat: str, target: Optional[int]) -> Tuple[int, int]:
 
 def build_system_prompt(cat: str, sub: str, wings: bool, lo: int, hi: int) -> str:
     bp = BLUEPRINTS.get("creature_" + sub, BLUEPRINTS["creature_quad"]) if cat == "creature" else BLUEPRINTS[cat]
-    blocks = [CORE_SKILL, bp] + ([WINGS_BP] if wings else [])
+    figure = cat == "humanoid" or (cat == "creature" and sub in ("quad", "dragon"))
+    blocks = [CORE_SKILL] + ([FIGURE_LAWS] if figure else []) + [bp] + ([WINGS_BP] if wings else [])
     return "\n\n".join(blocks).replace("@LO@", str(lo)).replace("@HI@", str(hi))
 
 
@@ -300,11 +337,15 @@ def build_user_prompt(prompt: str, cat: str, sub: str, lo: int, hi: int, web_ctx
         f'SUBJECT: "{prompt}"',
         f"CATEGORY: {cat}" + (f" ({sub})" if sub else ""),
         f"TARGET: {lo}-{hi} parts, longest side 24-45 studs.",
-        "CRITICAL MULTI-SLAB ROBLOX SCULPTING RULES:",
-        "1) DO NOT use 1 giant block per limb/chest! Build torso, chest, biceps, forearms, wrist bracers, and thighs from 3-6 stacked horizontal brick slabs (`smooth: 0.06`) that step in width to form a sculpted contour!",
-        "2) HOLLOW ROARING MOUTH & V-BROW FACE: Do NOT place a flat white plate over the whole face! Frame a deep dark `Head_Mouth_Pit` (`#0b0e14`) with `Head_Snout_Lip` on top, `Head_CheekPillar_L` & `R` on the sides, and `Head_Jaw_Upper` on the bottom. Put pink `Head_Tongue` and 8 white teeth (`Fang_UL/UR/LL/LR`, `Tooth_U1..2/L1..2`) inside the open mouth, and V-angled `Head_Brow_L` & `R` overhanging glowing red slit `Eye_L` & `Eye_R`!",
-        "3) JAGGED SHOULDER FUR & 4-RING GOLD CUFFS: Add 5-6 angled dark fur spikes per shoulder (`Pauldron_L_1..6`, `Pauldron_R_1..6`) and 4 stepped gold rings per wrist (`Bracer_L_Ring1..4`, `Bracer_R_Ring1..4`).",
+        "SCULPTING RULES: build every curve from 3-6 stacked, stepped brick slabs (`smooth: 0.06`), never one giant scaled block per body part.",
     ]
+    if cat == "humanoid" or (cat == "creature" and sub in ("quad", "dragon")):
+        out += [
+            "HOLLOW ROARING MOUTH & V-BROW FACE (only if the subject has a face like this): do NOT place a flat plate over the whole face. Frame a deep dark `Head_Mouth_Pit` (`#0b0e14`) with `Head_Snout_Lip` on top, `Head_CheekPillar_L` & `R` on the sides, `Head_Jaw_Upper` below, a pink `Head_Tongue` and white teeth inside, and V-angled `Head_Brow_L` & `R` over glowing `Eye_L` & `Eye_R`.",
+            "Add shoulder fur spikes (`Pauldron_L_1..6`) and stepped gold wrist rings (`Bracer_L_Ring1..4`) only if they fit the subject (apes, bosses, armoured characters).",
+        ]
+    else:
+        out.append("Use only features the real subject has. Do NOT add a crown, golden bracers, shoulder fur or a roaring mouth unless the subject needs them.")
     if web_ctx:
         out.append("LIVE WEB REFERENCE:\n" + web_ctx)
     return "\n".join(out)
@@ -336,7 +377,8 @@ class ProviderError(Exception):
         self.provider, self.status, self.message = provider, status, message
 
     def to_http(self) -> HTTPException:
-        code = 401 if self.status in (401, 403) else 404 if self.status == 404 else 429 if self.status == 429 else 502
+        code = (401 if self.status in (401, 403) else 404 if self.status == 404 else 429 if self.status == 429
+                else 504 if self.status == 504 else 502)
         return HTTPException(status_code=code, detail=f"{self.provider}: {self.message}"[:400])
 
 
@@ -421,7 +463,12 @@ async def _post_healing(client: httpx.AsyncClient, provider: str, url: str, head
                         payload: Dict[str, Any]) -> Dict[str, Any]:
     heals = retries = 0
     while True:
-        res = await client.post(url, headers=headers, json=payload)
+        try:
+            res = await client.post(url, headers=headers, json=payload)
+        except httpx.TimeoutException:
+            raise ProviderError(provider, 504, "the provider did not answer in time")
+        except httpx.HTTPError as e:
+            raise ProviderError(provider, 502, f"network error talking to {provider}: {e.__class__.__name__}")
         if res.status_code == 200:
             try:
                 return res.json()
@@ -439,33 +486,29 @@ async def _post_healing(client: httpx.AsyncClient, provider: str, url: str, head
 
 async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     requested = (model or DEFAULT_MODELS["gemini"]).strip()
-    primary = normalize_gemini_model(requested)
+    primary = normalize_gemini_model(requested)      # the model YOU picked comes first, always
     chain: List[str] = []
-    for m in (
-        primary,
-        "gemini-4-argon",
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-2.5-flash",
-    ):
+    for m in (primary, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash"):
         if m and m not in chain:
             chain.append(m)
 
-    budget = THINKING_BUDGETS.get(THINKING_LEVEL, 4096)
+    budget = THINKING_BUDGETS.get(THINKING_LEVEL, 1024)
     if "medium" in requested.lower():
         budget = 4096
     elif "high" in requested.lower():
         budget = 8192
 
+    deadline = time.monotonic() + GEMINI_TOTAL_S
     last: Optional[ProviderError] = None
     for m in chain:
+        remaining = deadline - time.monotonic()
+        if remaining < 20 and last is not None:
+            break
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
         gc: Dict[str, Any] = {
             "responseMimeType": "application/json",
             "temperature": 0.32,
-            "maxOutputTokens": 32768,
+            "maxOutputTokens": GEMINI_MAX_OUT,
         }
         if budget > 0 and "lite" not in m:
             gc["thinkingConfig"] = {"thinkingBudget": budget}
@@ -477,8 +520,18 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
         res = None
         heals = retries = 0
+        timed_out = False
         while True:
-            res = await client.post(url, headers=headers, json=payload)
+            left = max(15.0, min(GEMINI_CALL_S, deadline - time.monotonic()))
+            try:
+                res = await client.post(url, headers=headers, json=payload, timeout=httpx.Timeout(left, connect=15.0))
+            except httpx.TimeoutException:
+                timed_out = True
+                break
+            except httpx.HTTPError as e:
+                last = ProviderError("gemini", 502, f"network error: {e.__class__.__name__}")
+                res = None
+                break
             if res.status_code == 400 and heals < 5:
                 low = res.text.lower()
                 if "thinking" in low and "thinkingConfig" in gc:
@@ -500,6 +553,11 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
                 await asyncio.sleep(_retry_delay(res, retries))
                 continue
             break
+        if timed_out:
+            last = ProviderError("gemini", 504, f"{m} did not answer in time")
+            continue
+        if res is None:
+            continue
         if res.status_code == 200:
             data = res.json()
             cands = data.get("candidates") or [{}]
@@ -560,9 +618,14 @@ CALLERS = {"gemini": call_gemini, "openai": call_openai, "anthropic": call_anthr
 
 
 async def call_pollinations(client, system: str, user: str) -> str:
-    res = await client.post("https://text.pollinations.ai/openai", json={
-        "model": "openai", "temperature": 0.32, "jsonMode": True,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+    try:
+        res = await client.post("https://text.pollinations.ai/openai", json={
+            "model": "openai", "temperature": 0.32, "jsonMode": True,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+    except httpx.TimeoutException:
+        raise ProviderError("free-fallback", 504, "the free fallback AI did not answer in time")
+    except httpx.HTTPError as e:
+        raise ProviderError("free-fallback", 502, f"network error: {e.__class__.__name__}")
     if res.status_code != 200:
         raise ProviderError("free-fallback", res.status_code, _err_text(res))
     try:
@@ -578,12 +641,14 @@ async def call_llm(system: str, user: str, provider: str = "", model: str = "", 
     prov, key, model = (provider or "").lower().strip(), (api_key or "").strip(), (model or "").strip()
     if not prov and any(k in model.lower() for k in ("gemini", "flash", "argon")):
         prov = "gemini"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(170.0, connect=15.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
         if prov in CALLERS and (key or ENV_KEYS[prov]):
             try:
                 text, used = await CALLERS[prov](client, key or ENV_KEYS[prov], model, system, user)
                 return text, {"provider": prov, "model": used}
             except ProviderError as e:
+                # a bad key / unknown model / time-out is the user's real problem: report it instead of silently
+                # switching to some other AI. Only a rate limit falls through to the server's own keys.
                 if e.status != 429:
                     raise
         errors: List[str] = []
@@ -889,7 +954,7 @@ def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any],
         base = "#141c28"
 
     bh, bl, bs = _hex_to_hls(base)
-    if is_ape or (cat == "creature" and (bs < 0.12 or bl > 0.35)):
+    if is_ape:
         base = "#141c28"
         bh, bl, bs = _hex_to_hls(base)
 
@@ -1599,6 +1664,210 @@ def better(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     return ka > kb
 
 
+# --------------------------------------------------------------------------- global memory (shared model library)
+MEMORY_STOP = {
+    "a", "an", "the", "of", "with", "and", "please", "make", "build", "create", "generate", "me", "my", "i",
+    "want", "need", "give", "draw", "design", "some", "that", "this", "is", "it", "to", "for", "in", "on",
+    "model", "3d", "roblox", "can", "you", "like", "style", "very", "really", "its", "has", "have", "who", "which",
+}
+MEMORY_SYN = {
+    "huge": "giant", "enormous": "giant", "massive": "giant", "gigantic": "giant", "colossal": "giant",
+    "cartoon": "cartoony", "cartoonish": "cartoony", "cartoonlike": "cartoony", "toony": "cartoony",
+    "cute": "cute", "tiny": "small", "little": "small", "mini": "small",
+    "octopi": "octopus", "octopuses": "octopus", "calamari": "squid",
+}
+
+
+def _stem(w: str) -> str:
+    if w in MEMORY_SYN:
+        return MEMORY_SYN[w]
+    if len(w) > 4 and w.endswith("ies"):
+        w = w[:-3] + "y"
+    elif len(w) > 4 and w.endswith(("ses", "xes", "ches", "shes", "zes")):
+        w = w[:-2]
+    elif len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+        w = w[:-1]
+    return MEMORY_SYN.get(w, w)
+
+
+def prompt_tokens(prompt: str) -> frozenset:
+    words = re.findall(r"[a-z0-9]+", (prompt or "").lower())
+    toks = {_stem(w) for w in words if w not in MEMORY_STOP and len(w) > 1}
+    return frozenset(toks)
+
+
+def prompt_key(tokens: frozenset) -> str:
+    return " ".join(sorted(tokens))
+
+
+MEMORY_FLAG_LIMIT = int(os.getenv("MEMORY_FLAG_LIMIT", "3"))
+MEMORY_MIN_SCORE = int(os.getenv("MEMORY_MIN_SCORE", "70"))
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+
+def _pick_db_path() -> Path:
+    want = os.getenv("MEMORY_DB", "")
+    candidates = [Path(want)] if want else []
+    if Path("/var/data").is_dir():                     # Render persistent disk mount
+        candidates.append(Path("/var/data/verdant_memory.db"))
+    candidates += [Path(__file__).parent / "data" / "verdant_memory.db", Path("/tmp/verdant_memory.db")]
+    for c in candidates:
+        try:
+            c.parent.mkdir(parents=True, exist_ok=True)
+            probe = c.parent / ".write_test"
+            probe.write_text("ok")
+            probe.unlink()
+            return c
+        except Exception:
+            continue
+    return Path("/tmp/verdant_memory.db")
+
+
+class MemoryStore:
+    """Shared library: prompt -> finished model. One SQLite file, safe for many users at once."""
+
+    def __init__(self) -> None:
+        self.path = _pick_db_path()
+        self.lock = threading.RLock()
+        self.db = sqlite3.connect(str(self.path), check_same_thread=False)
+        self.db.row_factory = sqlite3.Row
+        with self.lock:
+            self.db.executescript("""
+                CREATE TABLE IF NOT EXISTS models(
+                    id TEXT PRIMARY KEY, key TEXT UNIQUE, prompt TEXT, category TEXT, title TEXT,
+                    payload TEXT, parts INTEGER, score INTEGER, uses INTEGER DEFAULT 0,
+                    flags INTEGER DEFAULT 0, parent_id TEXT, created REAL, last_used REAL, engine TEXT);
+                CREATE INDEX IF NOT EXISTS idx_models_used ON models(uses DESC);
+            """)
+            self.db.commit()
+        self.index: List[Dict[str, Any]] = []
+        self.reload()
+
+    @property
+    def persistent(self) -> bool:
+        return bool(os.getenv("MEMORY_DB")) or str(self.path).startswith("/var/data")
+
+    def reload(self) -> None:
+        with self.lock:
+            rows = self.db.execute("SELECT id,key,prompt,category,title,parts,score,uses FROM models WHERE flags < ?",
+                                   (MEMORY_FLAG_LIMIT,)).fetchall()
+        self.index = [{**dict(r), "tokens": frozenset(r["key"].split())} for r in rows]
+
+    def count(self) -> int:
+        return len(self.index)
+
+    def find(self, tokens: frozenset) -> Tuple[str, Optional[Dict[str, Any]], List[str], List[str]]:
+        """-> (mode, entry, added_words, dropped_words); mode is 'exact', 'variant' or 'none'."""
+        if not tokens:
+            return "none", None, [], []
+        best_exact, best_var = None, None
+        for e in self.index:
+            b = e["tokens"]
+            if not b:
+                continue
+            inter = len(tokens & b)
+            union = len(tokens | b)
+            jac = inter / union if union else 0.0
+            if b == tokens or jac >= 0.85:
+                if best_exact is None or e["uses"] > best_exact["uses"]:
+                    best_exact = e
+                continue
+            subset = b < tokens and len(b) / len(tokens) >= 0.4
+            if subset or jac >= 0.5:
+                rank = (1 if subset else 0, jac, e["score"], e["uses"])
+                if best_var is None or rank > best_var[0]:
+                    best_var = (rank, e)
+        if best_exact:
+            return "exact", best_exact, [], []
+        if best_var:
+            e = best_var[1]
+            return "variant", e, sorted(tokens - e["tokens"]), sorted(e["tokens"] - tokens)
+        return "none", None, [], []
+
+    def get(self, mid: str) -> Optional[Dict[str, Any]]:
+        with self.lock:
+            r = self.db.execute("SELECT * FROM models WHERE id=? AND flags < ?", (mid, MEMORY_FLAG_LIMIT)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d["payload"] = json.loads(d["payload"])
+        return d
+
+    def touch(self, mid: str) -> int:
+        with self.lock:
+            self.db.execute("UPDATE models SET uses = uses + 1, last_used = ? WHERE id = ?", (time.time(), mid))
+            self.db.commit()
+            r = self.db.execute("SELECT uses FROM models WHERE id=?", (mid,)).fetchone()
+        for e in self.index:
+            if e["id"] == mid:
+                e["uses"] = r["uses"] if r else e["uses"] + 1
+        return r["uses"] if r else 0
+
+    def save(self, prompt: str, tokens: frozenset, category: str, payload: Dict[str, Any], score: int,
+             parent_id: str = "", engine: str = "") -> str:
+        key = prompt_key(tokens)
+        mid = uuid.uuid4().hex[:12]
+        now = time.time()
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO models(id,key,prompt,category,title,payload,parts,score,uses,flags,parent_id,created,last_used,engine)"
+                " VALUES(?,?,?,?,?,?,?,?,0,0,?,?,?,?)",
+                (mid, key, prompt[:300], category, str(payload.get("title") or prompt)[:80],
+                 json.dumps(payload, separators=(",", ":")), len(payload.get("ops") or []), int(score),
+                 parent_id or None, now, now, engine[:80]))
+            self.db.commit()
+            if cur.rowcount == 0:                       # somebody saved the same key a moment ago
+                r = self.db.execute("SELECT id FROM models WHERE key=?", (key,)).fetchone()
+                return r["id"] if r else ""
+        self.reload()
+        return mid
+
+    def flag(self, mid: str) -> bool:
+        with self.lock:
+            cur = self.db.execute("UPDATE models SET flags = flags + 1 WHERE id=?", (mid,))
+            self.db.commit()
+        self.reload()
+        return cur.rowcount > 0
+
+    def delete(self, mid: str) -> bool:
+        with self.lock:
+            cur = self.db.execute("DELETE FROM models WHERE id=?", (mid,))
+            self.db.commit()
+        self.reload()
+        return cur.rowcount > 0
+
+    def listing(self, q: str = "", limit: int = 40, sort: str = "popular") -> List[Dict[str, Any]]:
+        q = (q or "").strip().lower()
+        order = "uses DESC, created DESC" if sort == "popular" else "created DESC"
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT id,prompt,category,title,parts,score,uses,parent_id,created FROM models WHERE flags < ? "
+                f"AND (? = '' OR lower(prompt) LIKE ? OR lower(title) LIKE ?) ORDER BY {order} LIMIT ?",
+                (MEMORY_FLAG_LIMIT, q, f"%{q}%", f"%{q}%", max(1, min(100, limit)))).fetchall()
+        return [dict(r) for r in rows]
+
+
+MEMORY = MemoryStore()
+_INFLIGHT: Dict[str, "asyncio.Future[Dict[str, Any]]"] = {}
+
+
+def apply_tonal(ops: List[Dict[str, Any]], tonal: bool) -> List[Dict[str, Any]]:
+    out = []
+    for o in ops:
+        o = dict(o)
+        if tonal and not _NO_JITTER.search(str(o.get("id", ""))):
+            try:
+                o["color"] = jitter(o["color"], o["id"])
+            except Exception:
+                pass
+        out.append(o)
+    return out
+
+
+def memory_info(source: str, **kw: Any) -> Dict[str, Any]:
+    return {"source": source, "total_models": MEMORY.count(), **kw}
+
+
 # --------------------------------------------------------------------------- pipeline
 async def ask_and_parse(system: str, user: str, provider: str, model: str, api_key: str, retries: int = 1):
     last: Optional[Exception] = None
@@ -1643,6 +1912,9 @@ class GenerateRequest(BaseModel):
     revise: Optional[bool] = None
     max_revisions: Optional[int] = None
     tonal_variation: bool = True
+    use_memory: bool = True        # look the prompt up in the shared library first
+    publish: bool = True           # save the result to the shared library
+    fresh: bool = False            # skip memory and force a brand-new AI build
 
 
 class ReviseRequest(BaseModel):
@@ -1663,29 +1935,15 @@ class TestKeyRequest(BaseModel):
     model: Optional[str] = ""
 
 
-@app.post("/generate")
-async def generate(req: GenerateRequest):
-    prompt = req.prompt.strip()[:1000]
-    if not prompt:
-        raise HTTPException(status_code=400, detail="Prompt is required.")
-    cat, sub, wings, matched = classify(prompt, req.category or "")
-    lo, hi = part_range(cat, req.target_parts)
-    web_ctx = clean_web_context(req.web_context or "")
-    if not web_ctx and req.use_serper:
-        web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "")
-    system = build_system_prompt(cat, sub, wings, lo, hi)
-    user = build_user_prompt(prompt, cat, sub, lo, hi, web_ctx)
+Progress = Any  # callable(str, str="") -> None
 
-    started = time.monotonic()
-    data, engine = await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")
-    if not matched and not (req.category or "") and str(data.get("category", "")).lower() in PART_RANGE:
-        cat = str(data["category"]).lower()
-        lo, hi = part_range(cat, req.target_parts)
-    try:
-        parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
 
+def _noop(msg: str, kind: str = "") -> None:
+    return None
+
+
+async def _revision_loop(system: str, prompt: str, cat: str, sub: str, lo: int, hi: int, data: Dict[str, Any],
+                         parts, analysis, req: GenerateRequest, started: float, progress: Progress):
     revisions = 0
     do_revise = AUTO_REVISE if req.revise is None else req.revise
     rounds = MAX_REVISIONS if req.max_revisions is None else max(0, min(2, req.max_revisions))
@@ -1696,6 +1954,7 @@ async def generate(req: GenerateRequest):
         elapsed = time.monotonic() - started
         if elapsed > REVISE_BUDGET_S * (revisions + 1) / (revisions + 2):
             break
+        progress(f"Checker found {len(blocking)} problem(s) - asking the AI to fix them...")
         try:
             d2, _eng = await ask_and_parse(system, build_revision_prompt(prompt, cat, lo, hi, parts, blocking),
                                            req.provider or "", req.model or "", req.api_key or "", retries=0)
@@ -1705,12 +1964,125 @@ async def generate(req: GenerateRequest):
         revisions += 1
         if better(a2, analysis):
             data, parts, analysis = d2, p2, a2
-    return JSONResponse(content=response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation,
-                                                 engine, revisions, bool(web_ctx)))
+    return data, parts, analysis, revisions
 
 
-@app.post("/revise")
-async def revise(req: ReviseRequest):
+async def _build_new(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
+                     dropped: List[str], progress: Progress) -> Tuple[Dict[str, Any], int]:
+    """One real AI build. With `base` the AI starts from a saved model and rebuilds it differently."""
+    cat, sub, wings, matched = classify(prompt, req.category or "")
+    lo, hi = part_range(cat, req.target_parts)
+    web_ctx = clean_web_context(req.web_context or "")
+    if not web_ctx and req.use_serper:
+        progress("Researching the subject on the web...")
+        web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "")
+    system = build_system_prompt(cat, sub, wings, lo, hi)
+    started = time.monotonic()
+
+    if base is not None:
+        bp = base["payload"]
+        scale = (bp.get("stats") or {}).get("scene_scale") or STUD
+        current = normalize_ops(bp["ops"], 1.0 / scale, "#141c28", cat, sub)
+        frame(current)
+        change = (f'Build "{prompt}" as a NEW, noticeably different take on the saved model "{base["prompt"]}". '
+                  f'Keep the same creature/object identity, but re-sculpt it in a fresh way (different part layout, '
+                  f'proportions and detailing - do not copy the old part list). '
+                  + (f'Apply these new traits: {", ".join(added)}. ' if added else "")
+                  + (f'Drop these traits from the old model: {", ".join(dropped)}.' if dropped else ""))
+        user = build_revision_prompt(prompt, cat, lo, hi, current, [], change)
+        progress(f'Re-sculpting the saved "{base["prompt"]}" model with: {", ".join(added) or "your changes"}...')
+    else:
+        user = build_user_prompt(prompt, cat, sub, lo, hi, web_ctx)
+        progress("Sculpting a brand-new 3D model...")
+
+    data, engine = await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")
+    if not matched and not (req.category or "") and str(data.get("category", "")).lower() in PART_RANGE:
+        cat = str(data["category"]).lower()
+        lo, hi = part_range(cat, req.target_parts)
+    try:
+        parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    data, parts, analysis, revisions = await _revision_loop(system, prompt, cat, sub, lo, hi, data, parts, analysis,
+                                                            req, started, progress)
+    payload = response_payload(prompt.title(), cat, data, parts, analysis, False, engine, revisions, bool(web_ctx))
+    return payload, analysis["score"]
+
+
+async def run_generate(req: GenerateRequest, progress: Progress = _noop) -> Dict[str, Any]:
+    prompt = req.prompt.strip()[:1000]
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+    tokens = prompt_tokens(prompt)
+    key = prompt_key(tokens)
+
+    mode, entry, added, dropped = ("none", None, [], [])
+    if req.use_memory and not req.fresh and tokens:
+        mode, entry, added, dropped = MEMORY.find(tokens)
+
+    # 1) somebody already built this exact prompt -> serve it, no AI call at all
+    if mode == "exact" and entry:
+        saved = MEMORY.get(entry["id"])
+        if saved:
+            uses = MEMORY.touch(entry["id"])
+            progress("Found in the global memory - no AI call needed.", "ok")
+            out = dict(saved["payload"])
+            out["ops"] = apply_tonal(out["ops"], req.tonal_variation)
+            out["engine"] = {"provider": "global-memory", "model": entry["id"]}
+            out["used_serper"] = False
+            out["memory"] = memory_info("memory", id=entry["id"], uses=uses, base_prompt=saved["prompt"], saved=False)
+            return out
+
+    # 2) the same prompt is already being built by someone else right now -> wait for that result
+    if req.use_memory and not req.fresh and key in _INFLIGHT:
+        progress("Someone else is building this right now - waiting for their result...")
+        try:
+            shared = await asyncio.wait_for(asyncio.shield(_INFLIGHT[key]), timeout=170)
+            out = dict(shared)
+            out["ops"] = apply_tonal(out["ops"], req.tonal_variation)
+            out["memory"] = {**(out.get("memory") or {}), "source": "memory", "saved": False}
+            return out
+        except Exception:
+            pass
+
+    fut: Optional["asyncio.Future[Dict[str, Any]]"] = None
+    if tokens and key not in _INFLIGHT:
+        fut = asyncio.get_running_loop().create_future()
+        _INFLIGHT[key] = fut
+    try:
+        base = MEMORY.get(entry["id"]) if (mode == "variant" and entry) else None
+        if mode == "variant" and not base:
+            mode = "none"
+        if base:
+            MEMORY.touch(base["id"])
+        payload, score = await _build_new(req, prompt, base, added, dropped, progress)
+
+        saved_id = ""
+        if req.publish and req.use_memory and tokens and score >= MEMORY_MIN_SCORE:
+            saved_id = MEMORY.save(prompt, tokens, payload.get("category", ""), payload, score,
+                                   parent_id=base["id"] if base else "",
+                                   engine=f"{payload['engine'].get('provider', '')}:{payload['engine'].get('model', '')}")
+            if saved_id:
+                progress("Published to the global memory.", "ok")
+        payload["memory"] = memory_info("variant" if base else "fresh", id=saved_id, saved=bool(saved_id),
+                                        base_prompt=base["prompt"] if base else "", added=added, dropped=dropped,
+                                        uses=0)
+        if fut and not fut.done():
+            fut.set_result(dict(payload))
+        out = dict(payload)
+        out["ops"] = apply_tonal(out["ops"], req.tonal_variation)
+        return out
+    except BaseException as e:
+        if fut and not fut.done():
+            fut.set_exception(e if isinstance(e, Exception) else RuntimeError("cancelled"))
+            fut.exception()  # mark retrieved so asyncio does not log it
+        raise
+    finally:
+        if fut is not None and _INFLIGHT.get(key) is fut:
+            _INFLIGHT.pop(key, None)
+
+
+async def run_revise(req: ReviseRequest, progress: Progress = _noop) -> Dict[str, Any]:
     change = req.instruction.strip()[:1000]
     if not change or not req.ops:
         raise HTTPException(status_code=400, detail="instruction and ops are required.")
@@ -1723,13 +2095,144 @@ async def revise(req: ReviseRequest):
         raise HTTPException(status_code=400, detail="ops contained fewer than 3 usable parts.")
     frame(current)
     system = build_system_prompt(cat, sub, wings, lo, hi)
+    progress("Applying your change...")
     data, engine = await ask_and_parse(system, build_revision_prompt(prompt, cat, lo, hi, current, [], change),
                                        req.provider or "", req.model or "", req.api_key or "")
     try:
         parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return JSONResponse(content=response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 1, False))
+    return response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 1, False)
+
+
+# --------------------------------------------------------------------------- background jobs (no more proxy time-outs)
+JOB_TTL_S = 1800
+_JOB_SLOTS: Optional[asyncio.Semaphore] = None
+
+
+def job_slots() -> asyncio.Semaphore:
+    global _JOB_SLOTS
+    if _JOB_SLOTS is None:
+        _JOB_SLOTS = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_BUILDS", "4")))
+    return _JOB_SLOTS
+JOBS: Dict[str, Dict[str, Any]] = {}
+_TASKS: set = set()
+
+
+def _gc_jobs() -> None:
+    now = time.time()
+    for jid in [k for k, v in JOBS.items() if now - v["updated"] > JOB_TTL_S]:
+        JOBS.pop(jid, None)
+
+
+def start_job(kind: str, coro_factory) -> str:
+    _gc_jobs()
+    jid = uuid.uuid4().hex[:16]
+    job = {"id": jid, "kind": kind, "status": "queued", "steps": [], "result": None, "error": None,
+           "created": time.time(), "updated": time.time()}
+    JOBS[jid] = job
+
+    def progress(msg: str, kind_: str = "") -> None:
+        job["steps"].append({"t": round(time.time() - job["created"], 1), "msg": msg, "kind": kind_})
+        job["updated"] = time.time()
+
+    async def runner() -> None:
+        try:
+            async with job_slots():
+                job["status"] = "running"
+                job["updated"] = time.time()
+                job["result"] = await asyncio.wait_for(coro_factory(progress), timeout=JOB_MAX_S)
+                job["status"] = "done"
+        except asyncio.TimeoutError:
+            job["status"], job["error"] = "error", {"status": 504, "detail": "The AI took too long. Pick a faster model and try again."}
+        except HTTPException as e:
+            job["status"], job["error"] = "error", {"status": e.status_code, "detail": str(e.detail)}
+        except Exception as e:  # never leave a job hanging
+            job["status"], job["error"] = "error", {"status": 500, "detail": f"{e.__class__.__name__}: {e}"[:300]}
+        job["updated"] = time.time()
+
+    task = asyncio.create_task(runner())
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
+    return jid
+
+
+@app.post("/jobs/generate")
+async def job_generate(req: GenerateRequest):
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+    return {"job_id": start_job("generate", lambda p: run_generate(req, p))}
+
+
+@app.post("/jobs/revise")
+async def job_revise(req: ReviseRequest):
+    return {"job_id": start_job("revise", lambda p: run_revise(req, p))}
+
+
+@app.get("/jobs/{job_id}")
+async def job_status(job_id: str, since: int = 0):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unknown or expired job.")
+    out = {"id": job_id, "status": job["status"], "steps": job["steps"][max(0, since):], "next": len(job["steps"]),
+           "elapsed": round(time.time() - job["created"], 1)}
+    if job["status"] == "done":
+        out["result"] = job["result"]
+    if job["status"] == "error":
+        out["error"] = job["error"]
+    return JSONResponse(content=out)
+
+
+# kept for older pages / curl: same pipeline, one blocking request
+@app.post("/generate")
+async def generate(req: GenerateRequest):
+    try:
+        return JSONResponse(content=await asyncio.wait_for(run_generate(req), timeout=JOB_MAX_S))
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="The AI took too long. Use /jobs/generate or a faster model.")
+
+
+@app.post("/revise")
+async def revise(req: ReviseRequest):
+    try:
+        return JSONResponse(content=await asyncio.wait_for(run_revise(req), timeout=JOB_MAX_S))
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="The AI took too long. Use /jobs/revise or a faster model.")
+
+
+# --------------------------------------------------------------------------- memory API
+@app.get("/memory")
+async def memory_list(q: str = "", sort: str = "popular", limit: int = 40):
+    return {"total": MEMORY.count(), "items": MEMORY.listing(q, limit, sort), "persistent": MEMORY.persistent}
+
+
+@app.get("/memory/{mid}")
+async def memory_get(mid: str, tonal: bool = True):
+    e = MEMORY.get(mid)
+    if not e:
+        raise HTTPException(status_code=404, detail="Model not found in global memory.")
+    uses = MEMORY.touch(mid)
+    out = dict(e["payload"])
+    out["ops"] = apply_tonal(out["ops"], tonal)
+    out["engine"] = {"provider": "global-memory", "model": mid}
+    out["memory"] = memory_info("memory", id=mid, uses=uses, base_prompt=e["prompt"], saved=False)
+    return JSONResponse(content=out)
+
+
+@app.post("/memory/{mid}/flag")
+async def memory_flag(mid: str):
+    if not MEMORY.flag(mid):
+        raise HTTPException(status_code=404, detail="Model not found.")
+    return {"ok": True}
+
+
+@app.delete("/memory/{mid}")
+async def memory_delete(mid: str, token: str = ""):
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Set ADMIN_TOKEN on the server and pass ?token= to delete.")
+    if not MEMORY.delete(mid):
+        raise HTTPException(status_code=404, detail="Model not found.")
+    return {"ok": True}
 
 
 @app.get("/skill")
@@ -1748,17 +2251,17 @@ async def test_key(req: TestKeyRequest):
         try:
             if prov == "serper":
                 res = await client.post(
-                    "[https://google.serper.dev/search](https://google.serper.dev/search)",
+                    "https://google.serper.dev/search",
                     headers={"X-API-KEY": key, "Content-Type": "application/json"},
                     json={"q": "3D low poly model", "num": 1},
                 )
                 if res.status_code != 200:
-                    raise HTTPException(status_code=400, detail="Serper rejected key.")
+                    raise HTTPException(status_code=400, detail="Serper rejected the key.")
                 return {"ok": True, "message": "Serper verified & active!"}
             if prov == "gemini":
                 m = normalize_gemini_model(model or "gemini-3.8-flash")
                 res = await client.post(
-                    f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
                     headers={"x-goog-api-key": key},
                     json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}},
                 )
@@ -1766,7 +2269,7 @@ async def test_key(req: TestKeyRequest):
                     raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
                 return {"ok": True, "message": f"Gemini verified ({m})!"}
             if prov in ("openai", "groq"):
-                base = "[https://api.openai.com/v1](https://api.openai.com/v1)" if prov == "openai" else "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
+                base = "https://api.openai.com/v1" if prov == "openai" else "https://api.groq.com/openai/v1"
                 m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
                 payload: Dict[str, Any] = {"model": m, "messages": [{"role": "user", "content": "OK"}]}
                 payload["max_completion_tokens" if _is_reasoning(m) else "max_tokens"] = 64 if _is_reasoning(m) else 10
@@ -1774,9 +2277,7 @@ async def test_key(req: TestKeyRequest):
                 return {"ok": True, "message": f"{prov.title()} verified!"}
             if prov == "anthropic":
                 await _post_healing(
-                    client,
-                    "anthropic",
-                    "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)",
+                    client, "anthropic", "https://api.anthropic.com/v1/messages",
                     {"x-api-key": key, "anthropic-version": "2023-06-01"},
                     {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]},
                 )
@@ -1786,14 +2287,18 @@ async def test_key(req: TestKeyRequest):
             raise
         except ProviderError as e:
             raise HTTPException(status_code=400, detail=f"{e.provider} rejected the key: {e.message}"[:1000])
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail=f"{prov} did not answer in time. Try again.")
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v19", "providers": [k for k, v in ENV_KEYS.items() if v],
-            "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL}
+    return {"status": "healthy", "version": "v20", "providers": [k for k, v in ENV_KEYS.items() if v],
+            "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL,
+            "memory": {"models": MEMORY.count(), "persistent": MEMORY.persistent, "path": str(MEMORY.path)},
+            "jobs_active": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running"))}
 
 
 def find_ui() -> Optional[Path]:
@@ -1813,4 +2318,4 @@ async def serve_ui():
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
