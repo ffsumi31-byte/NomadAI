@@ -26,7 +26,9 @@ Upgrades in v19:
 """
 import asyncio
 import colorsys
+import contextvars
 import json
+import logging
 import math
 import os
 import re
@@ -46,6 +48,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("verdant")
+
+# lets code deep inside the AI call report live progress to the job that is running it
+_PROGRESS: "contextvars.ContextVar[Any]" = contextvars.ContextVar("verdant_progress", default=None)
+
+
+def report(msg: str, kind: str = "live") -> None:
+    fn = _PROGRESS.get()
+    if fn:
+        try:
+            fn(msg, kind)
+        except Exception:
+            pass
+
+
 app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor Backend (v20)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -59,8 +77,10 @@ AI_MODEL = os.getenv("AI_MODEL", "gemini-3.8-flash")
 THINKING_LEVEL = os.getenv("THINKING_LEVEL", "low").lower().strip()
 GEMINI_TOTAL_S = float(os.getenv("GEMINI_TOTAL_S", "150"))   # whole Gemini chain, all models
 GEMINI_CALL_S = float(os.getenv("GEMINI_CALL_S", "110"))     # one Gemini request
-GEMINI_MAX_OUT = int(os.getenv("GEMINI_MAX_OUT", "24576"))
-JOB_MAX_S = float(os.getenv("JOB_MAX_S", "260"))             # hard cap for one background build
+GEMINI_MAX_OUT = int(os.getenv("GEMINI_MAX_OUT", "16384"))
+GEMINI_MAX_CHARS = int(os.getenv("GEMINI_MAX_CHARS", "60000"))  # stop a runaway / looping answer early
+GEMINI_STALL_S = float(os.getenv("GEMINI_STALL_S", "60"))        # no bytes at all for this long = stalled
+JOB_MAX_S = float(os.getenv("JOB_MAX_S", "200"))             # hard cap for one background build
 
 DEFAULT_MODELS = {
     "gemini": AI_MODEL,
@@ -144,7 +164,8 @@ CORE_SKILL = """You are the VERDANT MASTER BRICK SCULPTOR: an elite Roblox Studi
 CRITICAL SECRET OF REAL ROBLOX BOSS MODELS:
 Real Roblox models are NEVER made of 1 giant scaled block per body part with rounded borders! Instead, every curve, muscle, chest plate, brow arch, crown ring, wrist cuff, and shoulder fur tuft is sculpted from **4 to 10 stacked, stepped, overlapping brick slabs** (`shape: "box"`, `smooth: 0.06`) that step inward/outward by 0.5-1.0 stud per layer!
 
-OUTPUT - reply with ONE valid JSON object and nothing else (no markdown fences, no comments, no prose):
+OUTPUT - reply with ONE valid JSON object and nothing else (no markdown fences, no comments, no prose).
+Write every entry of "ops" as a compact ARRAY ROW [id, shape, [w,h,d], [x,y,z], [rotX,rotY,rotZ], "#rrggbb", smooth] - never as an object - so the answer stays short and fast. Never repeat or pad rows:
 {
   "title": "Iconic Game-Ready Title",
   "category": "creature|humanoid|vehicle|structure|prop|plant",
@@ -164,7 +185,7 @@ OUTPUT - reply with ONE valid JSON object and nothing else (no markdown fences, 
     "sections": {"Head_And_Face_Slabs": 36, "Stepped_Torso_And_Chest": 28, "Spiked_Shoulder_Fur": 16, "Multi_Slab_Arms_And_Cuffs": 38, "Legs_And_Toes": 24}
   },
   "ops": [
-    {"id":"Group_Part","shape":"box","size":[w,h,d],"pos":[x,y,z],"rot":[degX,degY,degZ],"color":"#rrggbb","smooth":0.06}
+    ["Group_Part","box",[w,h,d],[x,y,z],[degX,degY,degZ],"#rrggbb",0.06]
   ]
 }
 
@@ -484,6 +505,65 @@ async def _post_healing(client: httpx.AsyncClient, provider: str, url: str, head
         raise ProviderError(provider, res.status_code, _err_text(res))
 
 
+def _gemini_chunk(chunk: Dict[str, Any]) -> Tuple[str, str]:
+    c0 = (chunk.get("candidates") or [{}])[0]
+    parts = (c0.get("content") or {}).get("parts") or []
+    return "".join(p.get("text", "") for p in parts if not p.get("thought")), str(c0.get("finishReason") or "")
+
+
+def _err_body_text(body: str) -> str:
+    try:
+        j = json.loads(body)
+        e = j.get("error", j) if isinstance(j, dict) else j
+        return str(e.get("message") or e)[:260] if isinstance(e, dict) else str(e)[:260]
+    except Exception:
+        return (body or "")[:260]
+
+
+async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload: Dict[str, Any],
+                              deadline: float, model: str) -> Tuple[int, str, str, str]:
+    """-> (status, text-or-error-body, finish_reason, retry_after). Raises httpx.TimeoutException on a stall."""
+    t0 = time.monotonic()
+    tmo = httpx.Timeout(connect=15.0, read=GEMINI_STALL_S, write=30.0, pool=15.0)
+    async with client.stream("POST", url, headers=headers, json=payload, timeout=tmo) as res:
+        if res.status_code != 200:
+            body = (await res.aread()).decode("utf-8", "ignore")
+            return res.status_code, body, "", res.headers.get("retry-after", "")
+        buf: List[str] = []
+        chars, finish, last_rep = 0, "", 0.0
+        async for line in res.aiter_lines():
+            now = time.monotonic()
+            if now > deadline:
+                finish = "DEADLINE"
+                break
+            if not line.startswith("data:"):
+                continue
+            raw = line[5:].strip()
+            if not raw or raw == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(chunk, dict) and chunk.get("error"):
+                err = chunk["error"] if isinstance(chunk["error"], dict) else {}
+                return int(err.get("code") or 502), json.dumps(chunk), "", ""
+            txt, fin = _gemini_chunk(chunk if isinstance(chunk, dict) else {})
+            if txt:
+                buf.append(txt)
+                chars += len(txt)
+            if fin:
+                finish = fin
+            if now - last_rep > 1.5:
+                report(f"{model} is writing the model... about {chars // 4:,} tokens")
+                last_rep = now
+            if chars > GEMINI_MAX_CHARS:     # runaway / looping answer: keep what we have, stop paying for it
+                finish = "LENGTH_CAP"
+                break
+        log.info("gemini %s: %d chars in %.1fs (finish=%s)", model, chars, time.monotonic() - t0, finish or "?")
+        return 200, "".join(buf), finish, ""
+
+
 async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     requested = (model or DEFAULT_MODELS["gemini"]).strip()
     primary = normalize_gemini_model(requested)      # the model YOU picked comes first, always
@@ -501,15 +581,10 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     deadline = time.monotonic() + GEMINI_TOTAL_S
     last: Optional[ProviderError] = None
     for m in chain:
-        remaining = deadline - time.monotonic()
-        if remaining < 20 and last is not None:
+        if deadline - time.monotonic() < 20 and last is not None:
             break
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-        gc: Dict[str, Any] = {
-            "responseMimeType": "application/json",
-            "temperature": 0.32,
-            "maxOutputTokens": GEMINI_MAX_OUT,
-        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:streamGenerateContent?alt=sse"
+        gc: Dict[str, Any] = {"responseMimeType": "application/json", "temperature": 0.32, "maxOutputTokens": GEMINI_MAX_OUT}
         if budget > 0 and "lite" not in m:
             gc["thinkingConfig"] = {"thinkingBudget": budget}
         payload = {
@@ -518,58 +593,46 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
             "generationConfig": gc,
         }
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
-        res = None
         heals = retries = 0
-        timed_out = False
+        report(f"Asking {m}...")
         while True:
-            left = max(15.0, min(GEMINI_CALL_S, deadline - time.monotonic()))
             try:
-                res = await client.post(url, headers=headers, json=payload, timeout=httpx.Timeout(left, connect=15.0))
+                status, body, finish, retry_after = await _gemini_stream_once(client, url, headers, payload, deadline, m)
             except httpx.TimeoutException:
-                timed_out = True
+                last = ProviderError("gemini", 504, f"{m} sent nothing for {int(GEMINI_STALL_S)}s (stalled)")
+                log.warning("gemini %s stalled", m)
                 break
             except httpx.HTTPError as e:
                 last = ProviderError("gemini", 502, f"network error: {e.__class__.__name__}")
-                res = None
                 break
-            if res.status_code == 400 and heals < 5:
-                low = res.text.lower()
+            if status == 200:
+                text = body.strip()
+                if text:
+                    return text, m
+                last = ProviderError("gemini", 502, f"{m} returned no text (finish: {finish or '?'})")
+                break
+            low = body.lower()
+            if status == 400 and heals < 5:
                 if "thinking" in low and "thinkingConfig" in gc:
-                    gc.pop("thinkingConfig")
-                    heals += 1
-                    continue
+                    gc.pop("thinkingConfig"); heals += 1; continue
                 if "mime" in low and "responseMimeType" in gc:
-                    gc.pop("responseMimeType")
-                    heals += 1
-                    continue
+                    gc.pop("responseMimeType"); heals += 1; continue
                 if "maxoutputtokens" in low or "output token" in low:
-                    new = _limit_from(low, gc["maxOutputTokens"]) or 16384
+                    new = _limit_from(low, gc["maxOutputTokens"]) or 8192
                     if new < gc["maxOutputTokens"]:
-                        gc["maxOutputTokens"] = new
-                        heals += 1
-                        continue
-            if retries < 1 and _worth_retrying(res):
+                        gc["maxOutputTokens"] = new; heals += 1; continue
+            if retries < 1 and status in RETRY_STATUS and not ("insufficient_quota" in low or "billing" in low):
                 retries += 1
-                await asyncio.sleep(_retry_delay(res, retries))
+                try:
+                    ra = float(retry_after)
+                except (TypeError, ValueError):
+                    ra = 0.0
+                await asyncio.sleep(min(5.0, ra if ra > 0 else 1.1))
                 continue
+            last = ProviderError("gemini", status, _err_body_text(body))
+            if status in (401, 403) or (status == 400 and "api key" in low):
+                raise last
             break
-        if timed_out:
-            last = ProviderError("gemini", 504, f"{m} did not answer in time")
-            continue
-        if res is None:
-            continue
-        if res.status_code == 200:
-            data = res.json()
-            cands = data.get("candidates") or [{}]
-            parts = (cands[0].get("content") or {}).get("parts") or []
-            text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
-            if text:
-                return text, m
-            last = ProviderError("gemini", 502, f"{m} returned no text (finish: {cands[0].get('finishReason')})")
-            continue
-        last = ProviderError("gemini", res.status_code, _err_text(res))
-        if res.status_code in (401, 403) or (res.status_code == 400 and "api key" in res.text.lower()):
-            raise last
     raise last or ProviderError("gemini", 502, "Gemini request failed")
 
 
@@ -742,14 +805,15 @@ def salvage_ops(text: str) -> Dict[str, Any]:
         return out
     dec, i = json.JSONDecoder(), m.end()
     while True:
-        j = text.find("{", i)
-        if j < 0:
+        cands = [x for x in (text.find("{", i), text.find("[", i)) if x >= 0]
+        if not cands:
             break
+        j = min(cands)
         try:
             obj, k = dec.raw_decode(text, j)
         except ValueError:
             break
-        if isinstance(obj, dict):
+        if isinstance(obj, (dict, list)):
             out["ops"].append(obj)
         i = k
     return out
@@ -1958,7 +2022,7 @@ async def _revision_loop(system: str, prompt: str, cat: str, sub: str, lo: int, 
         try:
             d2, _eng = await ask_and_parse(system, build_revision_prompt(prompt, cat, lo, hi, parts, blocking),
                                            req.provider or "", req.model or "", req.api_key or "", retries=0)
-            p2, a2 = process_build(d2, cat, sub, lo, hi, prompt)
+            p2, a2 = await asyncio.to_thread(process_build, d2, cat, sub, lo, hi, prompt)
         except (HTTPException, ValueError):
             break
         revisions += 1
@@ -2000,7 +2064,7 @@ async def _build_new(req: GenerateRequest, prompt: str, base: Optional[Dict[str,
         cat = str(data["category"]).lower()
         lo, hi = part_range(cat, req.target_parts)
     try:
-        parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
+        parts, analysis = await asyncio.to_thread(process_build, data, cat, sub, lo, hi, prompt)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     data, parts, analysis, revisions = await _revision_loop(system, prompt, cat, sub, lo, hi, data, parts, analysis,
@@ -2099,7 +2163,7 @@ async def run_revise(req: ReviseRequest, progress: Progress = _noop) -> Dict[str
     data, engine = await ask_and_parse(system, build_revision_prompt(prompt, cat, lo, hi, current, [], change),
                                        req.provider or "", req.model or "", req.api_key or "")
     try:
-        parts, analysis = process_build(data, cat, sub, lo, hi, prompt)
+        parts, analysis = await asyncio.to_thread(process_build, data, cat, sub, lo, hi, prompt)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 1, False)
@@ -2133,21 +2197,29 @@ def start_job(kind: str, coro_factory) -> str:
     JOBS[jid] = job
 
     def progress(msg: str, kind_: str = "") -> None:
-        job["steps"].append({"t": round(time.time() - job["created"], 1), "msg": msg, "kind": kind_})
         job["updated"] = time.time()
+        if kind_ == "live":                 # one replaceable status line, not a growing list
+            job["live"] = msg
+            return
+        job["steps"].append({"t": round(time.time() - job["created"], 1), "msg": msg, "kind": kind_})
 
     async def runner() -> None:
         try:
+            _PROGRESS.set(progress)
             async with job_slots():
                 job["status"] = "running"
                 job["updated"] = time.time()
                 job["result"] = await asyncio.wait_for(coro_factory(progress), timeout=JOB_MAX_S)
                 job["status"] = "done"
+                log.info("job %s (%s) done in %.1fs", jid, kind, time.time() - job["created"])
         except asyncio.TimeoutError:
-            job["status"], job["error"] = "error", {"status": 504, "detail": "The AI took too long. Pick a faster model and try again."}
+            log.warning("job %s (%s) hit the %ss cap", jid, kind, JOB_MAX_S)
+            job["status"], job["error"] = "error", {"status": 504, "detail": f"The AI took longer than {int(JOB_MAX_S)}s. Pick a faster model (Gemini Flash-Lite) and try again."}
         except HTTPException as e:
+            log.warning("job %s failed: %s %s", jid, e.status_code, e.detail)
             job["status"], job["error"] = "error", {"status": e.status_code, "detail": str(e.detail)}
         except Exception as e:  # never leave a job hanging
+            log.exception("job %s crashed", jid)
             job["status"], job["error"] = "error", {"status": 500, "detail": f"{e.__class__.__name__}: {e}"[:300]}
         job["updated"] = time.time()
 
@@ -2175,6 +2247,7 @@ async def job_status(job_id: str, since: int = 0):
     if not job:
         raise HTTPException(status_code=404, detail="Unknown or expired job.")
     out = {"id": job_id, "status": job["status"], "steps": job["steps"][max(0, since):], "next": len(job["steps"]),
+           "live": job.get("live", ""),
            "elapsed": round(time.time() - job["created"], 1)}
     if job["status"] == "done":
         out["result"] = job["result"]
@@ -2295,7 +2368,7 @@ async def test_key(req: TestKeyRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v20", "providers": [k for k, v in ENV_KEYS.items() if v],
+    return {"status": "healthy", "version": "v21", "providers": [k for k, v in ENV_KEYS.items() if v],
             "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL,
             "memory": {"models": MEMORY.count(), "persistent": MEMORY.persistent, "path": str(MEMORY.path)},
             "jobs_active": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running"))}
