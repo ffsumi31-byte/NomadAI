@@ -1,35 +1,5 @@
 """
-Verdant 3D - Roblox-native multi-AI backend (v22 - Depth 3D workspace + AI effort levels)
-
-v22: * "Depth 3D" variant: the AI sculpts LOW-POLY CONVEX VOLUMES (hulls) for the Low Poly workspace.
-     * AI effort levels low / mid / high / extra change thinking, detail, research, quality passes and best-of-2.
-     * Global memory is aware of variant + effort (a higher effort upgrades a saved model).
-     * GET /workspace serves the standalone workspace, GET /skill?variant=depth3d shows what the AI is taught.
-
-v20 notes:
-
-v20 on top of v19:
-- GLOBAL MEMORY: every finished build is saved (SQLite). Same prompt again = served from memory, zero AI calls.
-  Near-identical prompt ("a giant squid with cartoony head") = the AI re-sculpts the saved model differently,
-  and the new version is published to the memory too.
-- Background jobs (/jobs/generate, /jobs/{id}) so slow Gemini builds never hit the proxy/browser time-out.
-- httpx time-outs are caught (no more bare 500s), Gemini has a total deadline, and the model you pick is respected.
-- Fixed broken markdown URLs in /test-key, wrong auto-classification ("giant" = humanoid), forced dark palette on non-apes.
-
-Upgrades in v19:
-1. Automatic Monolith-to-Multi-Slab Sculptor (subdivide_monoliths_into_slabs):
-   Eliminates "one giant scaled block" syndrome! Any oversized single block on the torso,
-   chest, biceps, forearms, thighs, shins, or wrist bracers is automatically subdivided into
-   3 to 5 stepped, tapered Roblox brick slabs so curves are formed by real multi-part geometry
-   (matching Screenshot 528) instead of one big rounded cube.
-2. Hollow-Frame Open-Mouth Face Solver (build_3d_hollow_face):
-   Never covers the face with a single flat white wall! Constructs the face around a deep dark
-   recessed Mouth Cavity framed by Upper Snout, Left/Right Cheek Pillars, and Lower Jaw, with
-   V-angled overhanging Brow Ridges, glowing red slit Eyes, pink Tongue, and 8 upper/lower Fangs.
-3. Crisp Roblox Studio Beveling (smooth = 0.05..0.11):
-   Keeps `flatShading` active in Three.js (`smooth < 0.15`) so every stacked brick layer and
-   faceted armor/fur plate casts crisp Studio shadows instead of turning into a blurry pillow.
-4. Raised MAX_PARTS to 240 so subdivided brick layers, shoulder fur spikes, and facial slabs fit cleanly.
+Verdant 3D - Roblox-native multi-AI backend (v23 - Universal Standable Depth 3D + Multi-Slab Sculptor)
 """
 import asyncio
 import colorsys
@@ -58,7 +28,6 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("verdant")
 
-# lets code deep inside the AI call report live progress to the job that is running it
 _PROGRESS: "contextvars.ContextVar[Any]" = contextvars.ContextVar("verdant_progress", default=None)
 
 
@@ -120,7 +89,7 @@ def effort_range(lo: int, hi: int, prof: Dict[str, Any]) -> Tuple[int, int]:
     return max(40, lo2), max(60, hi2)
 
 
-app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor + Depth 3D Backend (v22)")
+app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor + Universal Depth 3D Backend (v23)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -131,12 +100,12 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "gemini-3.8-flash")
 THINKING_LEVEL = os.getenv("THINKING_LEVEL", "low").lower().strip()
-GEMINI_TOTAL_S = float(os.getenv("GEMINI_TOTAL_S", "150"))   # whole Gemini chain, all models
-GEMINI_CALL_S = float(os.getenv("GEMINI_CALL_S", "110"))     # one Gemini request
+GEMINI_TOTAL_S = float(os.getenv("GEMINI_TOTAL_S", "150"))
+GEMINI_CALL_S = float(os.getenv("GEMINI_CALL_S", "110"))
 GEMINI_MAX_OUT = int(os.getenv("GEMINI_MAX_OUT", "16384"))
-GEMINI_MAX_CHARS = int(os.getenv("GEMINI_MAX_CHARS", "60000"))  # stop a runaway / looping answer early
-GEMINI_STALL_S = float(os.getenv("GEMINI_STALL_S", "60"))        # no bytes at all for this long = stalled
-JOB_MAX_S = float(os.getenv("JOB_MAX_S", "200"))             # hard cap for one background build
+GEMINI_MAX_CHARS = int(os.getenv("GEMINI_MAX_CHARS", "60000"))
+GEMINI_STALL_S = float(os.getenv("GEMINI_STALL_S", "60"))
+JOB_MAX_S = float(os.getenv("JOB_MAX_S", "200"))
 
 DEFAULT_MODELS = {
     "gemini": AI_MODEL,
@@ -189,13 +158,13 @@ THINKING_BUDGETS = {
     "high": 8192,
 }
 
-STUD = 0.28               # metres per Roblox stud
+STUD = 0.28
 MAX_PARTS = 240
 MAX_EXTENT_STUDS = 70.0
 MAX_PART_STUDS = 28.0
 MIN_PART_STUDS = 0.16
 SCENE_MAX_M = 12.0
-PUSH = 0.10               # 0.10 stud offset so decals/trim never z-fight
+PUSH = 0.10
 SHAPES = {"box", "sphere", "cylinder", "cone", "torus"}
 SMOOTH_DEFAULT = {"box": 0.06, "sphere": 0.45, "cylinder": 0.18, "cone": 0.15, "torus": 0.30}
 SHAPE_ALIAS = {
@@ -267,7 +236,7 @@ MULTI-SLAB ROBLOX SCULPTING LAWS (FOLLOW STRICTLY):
 
 _i2 = CORE_SKILL.index("2. HOLLOW-FRAME ROARING FACE")
 _i5 = CORE_SKILL.index("5. CRISP STUDIO EDGES")
-FIGURE_LAWS = CORE_SKILL[_i2:_i5]          # face / shoulder-fur / crown / cuff rules: apes, bosses, humanoids only
+FIGURE_LAWS = CORE_SKILL[_i2:_i5]
 CORE_SKILL = (CORE_SKILL[:_i2]
               + "2. FOLLOW THE BLUEPRINT FOR THIS SUBJECT. Use only the features the real subject has - never add crowns, "
                 "golden bracers, shoulder fur or a roaring mouth unless the subject or blueprint calls for them.\n"
@@ -280,7 +249,7 @@ BLUEPRINTS = {
   - 1. HEAD, V-BROW & HOLLOW ROARING MOUTH (34-42 parts, centered at x=0, y=16..25):
     - Stepped Dark Cranium & Jagged Cheek Ruff (`base` `#141c28`):
       * `Head_Skull_1` [8.2, 2.6, 6.8] at [0, 22.8, 4.2], `Head_Skull_2` [8.8, 2.8, 7.2] at [0, 20.4, 4.0], `Head_Skull_3` [8.4, 2.6, 6.8] at [0, 18.0, 3.8].
-      * Jagged Cheek Fur Spikes (3 per side): `Head_Ruff_L1` [2.2, 1.8, 4.2] at [-4.6, 21.2, 4.8] rot [0,0,20], `Head_Ruff_L2` [2.4, 1.8, 4.4] at [-4.9, 19.6, 4.8] rot [0,0,30], `Head_Ruff_L3` [2.2, 1.6, 4.0] at [-4.6, 18.0, 4.8] rot [0,0,40] (and mirror `Head_Ruff_R1..3` at +4.6..+4.9).
+      * Jagged Cheek Ruff Spikes (3 per side): `Head_Ruff_L1` [2.2, 1.8, 4.2] at [-4.6, 21.2, 4.8] rot [0,0,20], `Head_Ruff_L2` [2.4, 1.8, 4.4] at [-4.9, 19.6, 4.8] rot [0,0,30], `Head_Ruff_L3` [2.2, 1.6, 4.0] at [-4.6, 18.0, 4.8] rot [0,0,40] (and mirror `Head_Ruff_R1..3` at +4.6..+4.9).
     - V-Angled Cream Brow & Fierce Red Slit Eyes (z = 8.0..8.9):
       * `Head_Forehead_Slab` (`secondary` `#e8dfd1`) [6.2, 1.4, 2.0] at [0, 22.4, 7.6].
       * Overhanging V-Brows (`secondary` `#e8dfd1`): `Head_Brow_Center` [2.0, 1.1, 2.2] at [0, 21.6, 8.7], `Head_Brow_L` [3.0, 1.1, 2.2] at [-1.9, 21.9, 8.6] rot [0,0,-16], `Head_Brow_R` [3.0, 1.1, 2.2] at [1.9, 21.9, 8.6] rot [0,0,16].
@@ -347,7 +316,7 @@ WINGS_BP = """WINGS ADD-ON: Build 2 large symmetrical wings spreading wide along
 KW = {
     "vehicle": r"\b(car|supercar|sportcar|sports car|hypercar|sedan|coupe|convertible|lamborghini|ferrari|porsche|bugatti|mclaren|mustang|camaro|corvette|gtr|supra|f1|formula|racecar|truck|pickup|lorry|bus|van|suv|jeep|hummer|limo|taxi|police car|ambulance|firetruck|tractor|motorcycle|motorbike|bike|bicycle|scooter|moped|atv|quad|tank|apc|humvee|train|locomotive|tram|subway|monorail|plane|airplane|biplane|airliner|fighter|jet|bomber|helicopter|chopper|drone|blimp|zeppelin|airship|rocket|spaceship|starship|spacecraft|shuttle|ufo|saucer|rover|lander|boat|ship|sailboat|yacht|speedboat|ferry|cruiser|battleship|carrier|submarine|sub|pirate ship|galleon|canoe|kayak|raft|jetski|hovercraft|sled|sleigh|chariot|wagon|cart|carriage|coach|rickshaw|kart|go-kart|buggy|forklift|bulldozer|excavator|crane|dump truck|cement mixer|combine|harvester|snowplow|snowmobile|segway|skateboard|hoverboard|rollercoaster)\b",
     "structure": r"\b(house|home|cottage|cabin|chalet|bungalow|villa|mansion|manor|estate|palace|chateau|castle|keep|citadel|fortress|fort|bastion|bunker|outpost|watchtower|guardtower|tower|turret|spire|obelisk|monument|memorial|arch|gate|gateway|portals?|wall|rampart|bridge|viaduct|aqueduct|overpass|pier|dock|wharf|harbor|lighthouse|beacon|windmill|watermill|mill|barn|silo|stable|coop|greenhouse|conservatory|shed|shack|hut|hovel|igloo|yurt|teepee|tent|pavilion|gazebo|pergola|pagoda|shrine|temple|sanctuary|monastery|abbey|church|cathedral|chapel|mosque|synagogue|stupa|pyramid|ziggurat|parthenon|colosseum|amphitheater|arena|stadium|coliseum|gym|pool|rink|shop|store|market|bazaar|stall|booth|kiosk|bakery|cafe|coffee shop|restaurant|diner|pizzeria|bar|pub|tavern|inn|hotel|motel|hostel|bank|vault|post office|library|school|university|college|academy|museum|gallery|theater|theatre|cinema|opera|studio|workshop|forge|smithy|foundry|factory|warehouse|depot|hangar|garage|gas station|service station|fire station|police station|hospital|clinic|pharmacy|prison|jail|dungeon|asylum|lab|laboratory|observatory|planetarium|power plant|reactor|substation|dam|water tower|cooling tower|oil rig|pumpjack|mine|quarry|sawmill|lumberyard|farm|ranch|orchard|vineyard|park|playground|fountain|plaza|square|courtyard|alley|street|road|highway|intersection|roundabout|tunnel|subway station|train station|airport|terminal|control tower|helipad|spaceport|launch pad|moonbase|habitat|biodome|dome|skyline|cityblock|skyscraper|highrise|office|apartment|condo|tenement|ruins|stonehenge|totem)\b",
-    "humanoid": r"\b(man|woman|boy|girl|kid|child|baby|human|person|people|guy|lady|gentleman|villager|citizen|peasant|farmer|miner|blacksmith|merchant|trader|shopkeeper|baker|chef|cook|waiter|bartender|butcher|barber|tailor|carpenter|mason|builder|worker|mechanic|engineer|scientist|professor|teacher|student|doctor|nurse|surgeon|paramedic|firefighter|fireman|policeman|police|cop|detective|sheriff|deputy|guard|security|warden|prisoner|inmate|convict|criminal|thief|burglar|bandit|outlaw|robber|gangster|mafia|hitman|assassin|spy|agent|soldier|trooper|marine|commando|sniper|medic|pilot|captain|general|commander|admiral|sailor|seaman|pirate|buccaneer|corsair|viking|berserker|gladiator|spartan|centurion|legionnaire|knight|paladin|crusader|templar|squire|warrior|fighter|barbarian|brawler|monk|sensei|ninja|shinobi|samurai|ronin|shogun|kensei|archer|ranger|hunter|huntress|scout|rogue|bard|minstrel|jester|clown|mime|acrobat|magician|illusionist|wizard|sorcerer|sorceress|witch|warlock|mage|archmage|necromancer|druid|shaman|cleric|priest|priestess|bishop|pope|monarch|king|queen|prince|princess|emperor|empress|pharaoh|sultan|tsar|lord|duke|duchess|baron|noble|aristocrat|president|mayor|judge|lawyer|athlete|runner|sprinter|swimmer|diver|gymnast|boxer|wrestler|karate|judoka|fencer|skater|skier|snowboarder|surfer|cyclist|biker|racer|driver|golfer|tennis|basketball|football|soccer|baseball|hockey|quarterback|goalie|referee|coach|cheerleader|dancer|ballerina|singer|rockstar|musician|guitarist|drummer|dj|actor|director|artist|painter|sculptor|photographer|journalist|reporter|astronaut|cosmonaut|spaceman|explorer|adventurer|mountaineer|cowboy|cowgirl|desperado|native|tribal|nomad|bedouin|eskimo|inuit|elf|high elf|wood elf|dark elf|drow|dwarf|gnome|halfling|hobbit|orc|uruk|goblin|hobgoblin|troll|ogre|cyclops|giant|titan|goliath|minotaur|centaur|satyr|faun|harpy|siren|mermaid|merman|triton|naga|gorgon|medusa|lamia|succubus|incubus|demon|devil|fiend|imp|angel|seraph|cherub|valkyrie|deity|god|goddess|avatar|demigod|lich|vampire|nosferatu|werewolf|lycan|zombie|ghoul|wight|draugr|mummy|skeleton|ghost|phantom|specter|wraith|banshee|poltergeist|spirit|reaper|grim reaper|scarecrow|golem|ent|treant|elemental|djinn|genie|efreet|robot|android|cyborg|automaton|droid|mech|mecha|walker|synth|reploid|bionic|alien|martian|grey|reptilian|predator|mutant|superhero|supervillain|hero|villain|vigilante|sidekick|champion|character|npc|boss|miniboss|mob|dummy|mannequin|statue|bust|figurine|doll|action figure|toy soldier|nutcracker|snowman|santa|leprechaun|cupid)\b",
+    "humanoid": r"\b(man|woman|boy|girl|kid|child|baby|human|person|people|guy|lady|gentleman|villager|citizen|peasant|farmer|miner|blacksmith|merchant|trader|shopkeeper|baker|chef|cook|waiter|bartender|butcher|barber|tailor|carpenter|mason|builder|worker|mechanic|engineer|scientist|professor|teacher|student|doctor|nurse|surgeon|paramedic|firefighter|fireman|policeman|police|cop|detective|sheriff|deputy|guard|security|warden|prisoner|inmate|convict|criminal|thief|burglar|bandit|outlaw|robber|gangster|mafia|hitman|assassin|spy|agent|soldier|trooper|marine|commando|sniper|medic|pilot|captain|general|commander|admiral|sailor|seaman|pirate|buccaneer|corsair|viking|berserker|gladiator|spartan|centurion|legionnaire|knight|paladin|crusader|templar|squire|warrior|fighter|barbarian|brawler|monk|sensei|ninja|shinobi|samurai|ronin|shogun|kensei|archer|ranger|hunter|huntress|scout|rogue|bard|minstrel|jester|clown|mime|acrobat|magician|illusionist|wizard|sorcerer|sorceress|witch|warlock|mage|archmage|necromancer|druid|shaman|cleric|priest|priestess|bishop|pope|monarch|king|queen|prince|princess|emperor|empress|pharaoh|sultan|tsar|lord|duke|duchess|baron|noble|aristocrat|president|mayor|judge|lawyer|athlete|runner|sprinter|swimmer|diver|gymnast|boxer|wrestler|karate|judoka|fencer|skater|skier|snowboarder|surfer|cyclist|biker|racer|driver|golfer|tennis|basketball|football|soccer|baseball|hockey|quarterback|goalie|referee|coach|cheerleader|dancer|ballerina|singer|rockstar|musician|guitarist|drummer|dj|actor|director|artist|painter|sculptor|photographer|journalist|reporter|astronaut|cosmonaut|spaceman|explorer|adventurer|mountaineer|cowboy|cowgirl|desperado|native|tribal|nomad|bedouin|eskimo|inuit|elf|high elf|wood elf|dark elf|drow|dwarf|gnome|halfling|hobbit|orc|uruk|goblin|hobgoblin|troll|ogre|cyclops|titan|goliath|minotaur|centaur|satyr|faun|harpy|siren|mermaid|merman|triton|naga|gorgon|medusa|lamia|succubus|incubus|demon|devil|fiend|imp|angel|seraph|cherub|valkyrie|deity|god|goddess|avatar|demigod|lich|vampire|nosferatu|werewolf|lycan|zombie|ghoul|wight|draugr|mummy|skeleton|ghost|phantom|specter|wraith|banshee|poltergeist|spirit|reaper|grim reaper|scarecrow|golem|ent|treant|elemental|djinn|genie|efreet|robot|android|cyborg|automaton|droid|mech|mecha|walker|synth|reploid|bionic|alien|martian|grey|reptilian|predator|mutant|superhero|supervillain|hero|villain|vigilante|sidekick|champion|character|npc|miniboss|mob|dummy|mannequin|statue|bust|figurine|doll|action figure|toy soldier|nutcracker|snowman|santa|leprechaun|cupid)\b",
     "plant": r"\b(tree|oak|pine|fir|spruce|cedar|redwood|sequoia|birch|maple|willow|weeping willow|elm|ash|beech|poplar|aspen|cypress|yew|baobab|acacia|banyan|mangrove|palm|coconut palm|date palm|banana tree|apple tree|cherry blossom|sakura|peach tree|orange tree|lemon tree|olive tree|fig tree|bonsai|topiary|dead tree|hollow tree|stump|log|branch|twig|root|bush|shrub|hedge|bramble|briar|berry bush|rose bush|hydrangea|azalea|rhododendron|lavender|heather|sagebrush|tumbleweed|flower|rose|tulip|sunflower|daisy|lily|waterlily|lotus|orchid|iris|peony|poppy|marigold|dandelion|violet|pansy|carnations|chrysanthemum|daffodil|hyacinth|hibiscus|jasmine|plumeria|bougainvillea|bird of paradise|protea|edelweiss|blossom|bouquet|wreath|garland|petal|bud|stem|leaf|leaves|clover|shamrock|fern|frond|moss|lichen|ivy|vine|creeper|liana|grapevine|beanstalk|grass|lawn|turf|meadow|reed|bulrush|cattail|papyrus|bamboo|sugarcane|wheat|barley|oats|rye|corn|maize|rice|crop|cactus|saguaro|prickly pear|barrel cactus|agave|aloe|yucca|succulent|echeveria|jade plant|venus flytrap|pitcher plant|sundew|carnivorous plant|rafflesia|corpse flower|kelp|seaweed|algae|coral|anemone|sponge|mushroom|toadstool|fungi|fungus|morel|truffle|chanterelle|puffball|amanita|mycelium|spore|forest|woods|grove|thicket|jungle|rainforest|swamp|marsh|bog|oasis|garden|terrace|planter|terrarium)\b",
     "prop": r"\b(sword|broadsword|longsword|shortsword|greatsword|claymore|rapier|foil|saber|sabre|scimitar|cutlass|katana|wakizashi|nodachi|tanto|dagger|dirk|stiletto|knife|machete|kukri|cleaver|bayonet|blade|excalibur|axe|battleaxe|hatchet|tomahawk|halberd|poleaxe|glaive|bardiche|scythe|sickle|kama|spear|lance|pike|javelin|harpoon|trident|bident|pitchfork|staff|quarterstaff|bo staff|magic staff|crozier|scepter|wand|rod|club|mace|morningstar|flail|warhammer|maul|mallet|hammer|sledgehammer|pickaxe|mattock|crowbar|wrench|spanner|screwdriver|pliers|saw|chainsaw|drill|jackhammer|shovel|spade|hoe|rake|trowel|shears|scissors|anvil|vise|bellows|tongs|chisel|level|tape measure|toolbox|ladder|scaffold|wheelbarrow|bow|longbow|shortbow|recurve bow|compound bow|crossbow|ballista|catapult|trebuchet|cannon|mortar|howitzer|gatling|minigun|gun|handgun|pistol|revolver|deagle|glock|luger|flintlock|musket|blunderbuss|rifle|carbine|assault rifle|ak47|m16|sniper rifle|shotgun|blaster|raygun|laser gun|plasma rifle|railgun|gauss|phaser|needler|bazooka|rpg|missile launcher|grenade launcher|flamethrower|taser|grenade|bomb|dynamite|tnt|c4|landmine|claymore mine|torpedo|missile|nuke|ammo|bullet|shell|cartridge|quiver|arrow|bolt|dart|shuriken|kunai|boomerang|chakram|sling|slingshot|whip|lasso|net|bola|shield|buckler|heater shield|kite shield|tower shield|pavise|aegis|riot shield|armor|breastplate|cuirass|chainmail|plate mail|gauntlet|bracer|greave|pauldron|helmet|helm|great helm|sallet|bascinet|morion|kabuto|spartan helmet|viking helmet|knight helmet|space helmet|diving helmet|gas mask|mask|oni mask|tiki mask|venetian mask|goggles|visor|glasses|sunglasses|monocle|eyepatch|crown|tiara|diadem|circlet|coronet|halo|hat|cap|top hat|bowler|fedora|sombrero|cowboy hat|beret|beanie|fez|turban|straw hat|wizard hat|witch hat|pirate hat|tricorne|santa hat|chef hat|hard hat|ring|amulet|talisman|pendant|necklace|locket|choker|bracelet|bangle|brooch|earring|medal|medallion|badge|crest|emblem|belt|buckle|strap|holster|scabbard|sheath|cape|cloak|scarf|tie|bowtie|glove|mitten|boot|shoe|sneaker|sandal|slipper|skate|rollerblade|ski|snowshoe|flipper|backpack|rucksack|knapsack|satchel|messenger bag|briefcase|suitcase|luggage|trunk|duffel|purse|handbag|pouch|wallet|canteen|flask|waterskin|chest|treasure chest|coffer|strongbox|safe|lockbox|mimic|crate|box|carton|package|parcel|present|gift|giftbox|barrel|keg|cask|vat|tun|bucket|pail|tub|trough|basket|hamper|urn|vase|amphora|jug|pitcher|ewer|jar|mason jar|canister|tin|can|bottle|potion|elixir|vial|phial|beaker|test tube|retort|alembic|cauldron|kettle|teapot|coffee pot|mug|cup|goblet|chalice|grail|tankard|stein|wineglass|champagne flute|tumbler|shot glass|bowl|plate|platter|dish|tray|salver|saucer|tureen|gravy boat|fork|spoon|ladle|spatula|whisk|rolling pin|cutting board|mortar and pestle|salt shaker|pepper mill|napkin|tablecloth|placemat|coaster|candlestick|candelabra|menorah|chandelier|lantern|oil lamp|genie lamp|lava lamp|desk lamp|floor lamp|streetlamp|flashlight|torch|brazier|campfire|bonfire|fireplace|hearth|stove|oven|microwave|toaster|blender|mixer|coffee maker|espresso|fridge|refrigerator|freezer|sink|faucet|tap|bathtub|shower|toilet|mirror|scale|towel rack|soap dispenser|toothbrush|hairdryer|razor|comb|brush|perfume|lipstick|compact|table|dining table|coffee table|end table|side table|nightstand|desk|workbench|counter|island|altar|podium|lectern|easel|chair|armchair|recliner|rocking chair|office chair|gaming chair|stool|barstool|bench|pew|throne|sofa|couch|loveseat|sectional|futon|chaise|ottoman|pouf|beanbag|bed|bunk bed|four-poster|crib|cradle|hammock|mattress|pillow|cushion|blanket|quilt|rug|carpet|mat|curtain|drapes|blinds|screen|divider|wardrobe|armoire|closet|dresser|chest of drawers|cabinet|cupboard|hutches|pantry|sideboard|buffet|credenza|locker|bookshelf|bookcase|shelf|rack|coat rack|hat stand|umbrella stand|plant stand|pedestal|plinth|column|pillar|balustrade|railing|fence|mailbox|fire hydrant|trash can|dumpster|recycle bin|lamppost|traffic light|stop sign|street sign|billboard|neon sign|awnings|parasol|umbrella|sleeping bag|cooler|grill|bbq|picnic table|birdbath|birdhouse|feeder|gnomes|wind chime|weathervane|sundial|globe|orrery|telescope|microscope|binoculars|spyglass|magnifying glass|compass|sextant|astrolabe|hourglass|clock|grandfather clock|wall clock|alarm clock|pocket watch|wristwatch|stopwatch|metronome|thermometer|barometer|balance|weights|abacus|calculator|typewriter|cash register|atm|vending machine|arcade|arcade cabinet|pinball|claw machine|jukebox|slot machine|roulette|pool table|foosball|air hockey|dartboard|chessboard|chess piece|dice|domino|cards|poker chip|mahjong|puzzle|rubiks cube|yo-yo|spinning top|dreidel|marbles|blocks|lego|train set|rocking horse|teddy bear|plushie|kite|balloon|ball|soccer ball|basketball|football|baseball|tennis ball|golf ball|bowling ball|bowling pin|billiard ball|beach ball|snowglobe|trophy|ribbon|plaque|bell|gong|whistle|bugle|trumpet|trombone|tuba|french horn|saxophone|clarinet|oboe|flute|piccolo|recorder|panpipes|harmonica|accordion|bagpipes|organ|piano|grand piano|upright piano|keyboard|harpsichord|harp|lyre|lute|guitar|acoustic guitar|electric guitar|bass|ukulele|banjo|mandolin|sitar|violin|viola|cello|double bass|fiddle|drum|snare|kick drum|tom|bongo|conga|djembe|timpani|tambourine|maraca|castanets|triangle|xylophone|marimba|vibraphone|glockenspiel|cymbal|hi-hat|microphone|amp|amplifier|speaker|subwoofer|boombox|radio|gramophone|phonograph|turntable|record player|vinyl|cassette|walkman|mp3|ipod|headphones|earbuds|camera|dslr|polaroid|camcorder|video camera|projector|film reel|clapperboard|tripod|spotlight|tv|television|crt|flatscreen|monitor|computer|pc|laptop|macbook|tablet|ipad|phone|smartphone|iphone|rotary phone|payphone|telephone|fax|printer|scanner|router|modem|server rack|mainframe|hard drive|floppy|usb|sd card|cd|dvd|battery|solar panel|wind turbine|generator|transformer|engine|motor|piston|gear|cog|spring|lever|pulley|valve|pipe|gauge|meter|switch|button|control panel|console|radar|satellite dish|antenna|buoy|anchor|ship wheel|propeller|oar|paddle|lifebuoy|treasure map|scroll|parchment|book|tome|grimoire|spellbook|bible|dictionary|encyclopedia|notebook|journal|diary|ledger|clipboard|folder|binder|letter|envelope|stamp|newspaper|magazine|comic|poster|painting|frame|canvas|palette|paintbrush|pencil|pen|quill|inkwell|crayon|marker|chalk|eraser|ruler|protractor|stapler|tape|glue|paperclip|pushpin|sculpture|gargoyle|well|gravestone|tombstone|crypt|sarcophagus|coffin|casket|skull|bones|ribcage|fossil|amber|crystal|quartz|amethyst|emerald|ruby|sapphire|diamond|topaz|opal|pearl|geode|ore|ingot|gold bar|nugget|coin|doubloon|key|skeleton key|keycard|padlock|chain|shackles|handcuffs|cage|trap|bear trap|mousetrap|target|bullseye|sandcastle|cake|birthday cake|wedding cake|cupcake|muffin|donut|doughnut|croissant|bagel|bread|loaf|baguette|pretzel|toast|pancake|waffle|pie|tart|cookie|biscuit|macaron|brownie|chocolate|candy|lollipop|candy cane|gummy|ice cream|sundae|popsicle|milkshake|smoothie|pizza|burger|hamburger|cheeseburger|hotdog|sandwich|taco|burrito|nachos|sushi|nigiri|maki|ramen|noodles|soup|stew|salad|steak|rib|chicken leg|drumstick|ham|bacon|sausage|egg|fried egg|omelette|cheese|butter|milk|yogurt|honey|jam|peanut butter|ketchup|mustard|mayo|hot sauce|soy sauce|oil|vinegar|salt|pepper|sugar|flour|pasta|cereal|popcorn|chips|fries|nut|acorn|pinecone|apple|banana|orange|lemon|lime|grapefruit|peach|pear|plum|cherry|strawberry|raspberry|blueberry|blackberry|grape|watermelon|melon|cantaloupe|pineapple|mango|papaya|kiwi|pomegranate|fig|date|coconut|avocado|tomato|potato|carrot|broccoli|cauliflower|cabbage|lettuce|spinach|kale|celery|asparagus|artichoke|bell pepper|chili|jalapeno|onion|garlic|leek|radish|turnip|beet|pumpkin|squash|zucchini|cucumber|eggplant|aubergine|pea|bean|peanut)\b",
 }
@@ -358,11 +327,6 @@ SUB_KW = {
     "aquatic": r"\b(fish|goldfish|koi|carp|trout|salmon|tuna|mackerel|sardine|anchovy|herring|cod|haddock|halibut|flounder|sole|plaice|turbot|catfish|pike|perch|bass|tilapia|piranha|barracuda|swordfish|marlin|sailfish|flying fish|anglerfish|lanternfish|blobfish|pufferfish|blowfish|boxfish|triggerfish|parrotfish|clownfish|angelfish|butterflyfish|tang|surgeonfish|moorish idol|lionfish|scorpionfish|stonefish|goby|blenny|wrasse|grouper|snapper|bream|betta|guppy|tetra|discus|cichlid|arowana|gar|arapaima|coelacanth|sturgeon|paddlefish|shark|great white|hammerhead|tiger shark|whale shark|basking shark|mako|thresher|bull shark|nurse shark|reef shark|goblin shark|megalodon|ray|stingray|manta ray|eagle ray|electric ray|sawfish|skate|guitarfish|whale|blue whale|humpback|sperm whale|orca|killer whale|beluga|narwhal|fin whale|minke|right whale|bowhead|pilot whale|beaked whale|dolphin|bottlenose|porpoise|vaquita|manatee|dugong|seacow|seal|sea lion|walrus|fur seal|elephant seal|leopard seal|otter|sea otter|platypus|axolotl|newt|salamander|tadpole|eel|moray|conger|electric eel|lamprey|hagfish|sea snake|serpent|sea serpent|leviathan|nessie|loch ness|mosasaur|ichthyosaur|plesiosaur|liopleurodon|basilosaurus|dunkleosteus|anomalocaris|seahorse|pipefish|seadragon|worm|earthworm|leech|bobbit worm|tube worm|flatworm|planarian|nudibranch|sea slug|sea cucumber|conch|snail|slug)\b",
 }
 WINGS_KW = r"\b(wing|wings|winged|dragon|wyvern|drake|pegasus|alicorn|griffin|griffon|hippogriff|phoenix|roc|thunderbird|harpy|gargoyle|sphinx|chimera|manticore|cockatrice|basilisk|bat|vampire bat|flying fox|pterodactyl|pteranodon|archaeopteryx|butterfly|moth|bee|bumblebee|wasp|hornet|dragonfly|damselfly|fairy|pixie|sprite|sylph|angel|seraph|cherub|valkyrie|demon|devil|imp|succubus|bird|eagle|hawk|falcon|owl|parrot|toucan|peacock|swan|flamingo|duck|goose|seagull|crow|raven|dove|pigeon|rooster|chicken|hummingbird|jetpack)\b"
-AIR_SEA_KW = r"\b(plane|airplane|biplane|jet|fighter|helicopter|chopper|drone|blimp|zeppelin|rocket|spaceship|starship|spacecraft|shuttle|ufo|saucer|boat|ship|sailboat|yacht|speedboat|ferry|battleship|submarine|hovercraft|sled|sleigh|jetski|canoe|kayak|raft)\b"
-BIG_VEHICLE_KW = r"\b(truck|pickup|lorry|semi|bus|van|suv|jeep|hummer|tractor|train|locomotive|tank|apc|rv|camper|forklift|bulldozer|excavator|crane|dump truck|cement mixer|combine|harvester|monster truck)\b"
-
-
-KW["humanoid"] = KW["humanoid"].replace("|giant|", "|").replace("|boss|", "|")
 ANIMAL_KW = (r"\b(gorilla|ape|apes|monkey|chimp|chimpanzee|baboon|orangutan|kong|yeti|bigfoot|sasquatch|goat|sheep|ram|"
              r"cow|bull|ox|buffalo|bison|pig|boar|horse|pony|donkey|zebra|giraffe|camel|llama|alpaca|deer|moose|elk|"
              r"reindeer|antelope|rhino|rhinoceros|hippo|hippopotamus|elephant|mammoth|bear|panda|wolf|dog|puppy|fox|"
@@ -578,7 +542,6 @@ def _err_body_text(body: str) -> str:
 
 async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload: Dict[str, Any],
                               deadline: float, model: str, stall: float = 60.0, max_chars: int = 60000) -> Tuple[int, str, str, str]:
-    """-> (status, text-or-error-body, finish_reason, retry_after). Raises httpx.TimeoutException on a stall."""
     t0 = time.monotonic()
     tmo = httpx.Timeout(connect=15.0, read=stall, write=30.0, pool=15.0)
     async with client.stream("POST", url, headers=headers, json=payload, timeout=tmo) as res:
@@ -613,7 +576,7 @@ async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload
             if now - last_rep > 1.5:
                 report(f"{model} is writing the model... about {chars // 4:,} tokens")
                 last_rep = now
-            if chars > max_chars:     # runaway / looping answer: keep what we have, stop paying for it
+            if chars > max_chars:
                 finish = "LENGTH_CAP"
                 break
         log.info("gemini %s: %d chars in %.1fs (finish=%s)", model, chars, time.monotonic() - t0, finish or "?")
@@ -622,7 +585,7 @@ async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload
 
 async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     requested = (model or DEFAULT_MODELS["gemini"]).strip()
-    primary = normalize_gemini_model(requested)      # the model YOU picked comes first, always
+    primary = normalize_gemini_model(requested)
     chain: List[str] = []
     for m in (primary, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash"):
         if m and m not in chain:
@@ -763,8 +726,6 @@ async def call_llm(system: str, user: str, provider: str = "", model: str = "", 
                 text, used = await CALLERS[prov](client, key or ENV_KEYS[prov], model, system, user)
                 return text, {"provider": prov, "model": used}
             except ProviderError as e:
-                # a bad key / unknown model / time-out is the user's real problem: report it instead of silently
-                # switching to some other AI. Only a rate limit falls through to the server's own keys.
                 if e.status != 429:
                     raise
         errors: List[str] = []
@@ -855,7 +816,7 @@ def salvage_ops(text: str) -> Dict[str, Any]:
     m = re.search(r'"category"\s*:\s*"([^"]*)"', text)
     if m:
         out["category"] = m.group(1)
-    m = re.search(r'"(?:ops|parts)"\s*:\s*\[', text)
+    m = re.search(r'"(?:ops|parts|hulls)"\s*:\s*\[', text)
     if not m:
         return out
     dec, i = json.JSONDecoder(), m.end()
@@ -981,8 +942,6 @@ _CYL_EXEMPT = re.compile(
 
 
 def heal_part_shape_and_smoothness(pid: str, shape: str, size: List[float], smooth: float, cat: str, sub: str) -> Tuple[str, float]:
-    """Keeps parts crisp (`smooth <= 0.08` for boxes) so Three.js uses flatShading (`u.s < 0.15`)
-    and never inflates limbs or torsos into marshmallow pillows!"""
     longest = max(size)
     if shape == "sphere":
         if not (_ROUND_EXEMPT.search(pid) and longest <= 3.6):
@@ -1023,7 +982,7 @@ def enforce_roblox_budget(parts: List[Dict[str, Any]], cat: str) -> int:
     return changed
 
 
-# --------------------------------------------------------------------------- Word-Boundary Semantic Color-Zone Enforcer
+# --------------------------------------------------------------------------- Universal Subject-Aware Palette & Color-Zone Enforcer
 def _hex_to_hls(c: str) -> Tuple[float, float, float]:
     r, g, b = (int(c[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
     return colorsys.rgb_to_hls(r, g, b)
@@ -1045,52 +1004,79 @@ _TOK_END = r"(?:$|_|\d)"
 
 _ZONE_SKIN_CHEST = re.compile(
     _TOK + r"(?:chest|pec|pecs|sternum|ab|abs|belly|underbelly|stomach|scute|forehead|cheekpillar|cheekbone|"
-           r"muzzle|snout|jaw|brow|ear|palm|finger|thumb|toe|suck|throat|socket)" + _TOK_END, re.I
+           r"muzzle|snout|jaw|brow|ear|palm|finger|thumb|toe|suck|throat|socket|plastron|breastplate|inlay|windshield|cabin_glass)" + _TOK_END, re.I
 )
 _ZONE_GOLD_TRIM = re.compile(
-    _TOK + r"(?:crown|bracer|cuff|bangle|buckle|trim|emblem|collar|rim|hilt|guard|pommel|halo|tiara)" + _TOK_END, re.I
+    _TOK + r"(?:crown|bracer|cuff|bangle|buckle|trim|emblem|collar|rim|hilt|guard|pommel|halo|tiara|horn|crest|exhaust|bumper|spire_tip)" + _TOK_END, re.I
 )
 _ZONE_GLOW_ACCENT = re.compile(
-    _TOK + r"(?:eye|eyes|iris|visor|reactor|gem|jewel|rune|flame|fire|laser|plasma|taillight|thruster|afterburner)" + _TOK_END, re.I
+    _TOK + r"(?:eye|eyes|iris|visor|reactor|gem|jewel|rune|flame|fire|laser|plasma|taillight|thruster|afterburner|lantern|beacon|core)" + _TOK_END, re.I
 )
 _ZONE_WHITE_LIGHT = re.compile(
-    _TOK + r"(?:tooth|teeth|fang|fangs|tusk|claw|talon|nail|sclera|highlight|shine|glint|headlight)" + _TOK_END, re.I
+    _TOK + r"(?:tooth|teeth|fang|fangs|tusk|claw|talon|nail|sclera|highlight|shine|glint|headlight|blade_edge)" + _TOK_END, re.I
 )
 _ZONE_DARK = re.compile(
-    _TOK + r"(?:pupil|mouth|pit|cavity|nostril|tire|tyre|slit|grille)" + _TOK_END, re.I
+    _TOK + r"(?:pupil|mouth|pit|cavity|nostril|tire|tyre|slit|grille|diffuser|splitter|wheel_well)" + _TOK_END, re.I
 )
 _ZONE_TONGUE = re.compile(_TOK + r"(?:tongue|gum|gums)" + _TOK_END, re.I)
 _ZONE_FORCE_BASE = re.compile(
-    _TOK + r"(?:cranium|skull|topdome|ruff|cheek|chin|torso|pelvis|hump|back|pauldron|tuft|shoulder|bicep|elbow|forearm|hand|hip|thigh|knee|shin|calf|foot|ankle|cap)" + _TOK_END, re.I
+    _TOK + r"(?:cranium|skull|topdome|ruff|cheek|chin|torso|pelvis|hump|back|pauldron|tuft|shoulder|bicep|elbow|forearm|hand|hip|thigh|knee|shin|calf|foot|ankle|cap|mantle|carapace|hull|chassis|fender|hood)" + _TOK_END, re.I
 )
+
+_PROMPT_COLOR_MAP = [
+    (r"\b(crimson|red|scarlet|ruby|fire|flame|lava|magma|inferno|charizard|blood)\b", "#b81d18", "#f3e5ab", "#f5a623", "#ffea00"),
+    (r"\b(purple|violet|amethyst|kraken|squid|octopus|void|shadow|nebula|arcane|dark elf)\b", "#5b2c86", "#dcd0ff", "#f5c518", "#00f5d4"),
+    (r"\b(blue|azure|cobalt|sapphire|ice|frost|glacier|water|ocean|sea|shark|whale|dolphin)\b", "#1b5e91", "#e2f1f8", "#90e0ef", "#00f5d4"),
+    (r"\b(green|emerald|jade|forest|jungle|moss|goblin|orc|treant|cactus|tree|plant|turtle|crocodile|alligator|frog|snake)\b", "#246a42", "#dcebd8", "#d4a338", "#ff595e"),
+    (r"\b(gold|golden|yellow|sun|solar|desert|sand|lion|griffin|bee|wasp|pikachu|pharaoh)\b", "#c98a1c", "#faf0ca", "#5c3c10", "#00bbf9"),
+    (r"\b(white|snow|polar|arctic|ivory|angel|ghost|skeleton|skull|unicorn|pegasus|snowman)\b", "#d9e2ec", "#9fb3c8", "#f5c518", "#38bdf8"),
+    (r"\b(orange|amber|copper|bronze|fox|tiger|pumpkin)\b", "#d95d1e", "#faedcd", "#2b2d42", "#70e000"),
+    (r"\b(pink|rose|magenta|coral|sakura|cherry|flamingo|axolotl)\b", "#d6457a", "#ffe5ec", "#f5c518", "#00f5d4"),
+    (r"\b(brown|wood|wooden|oak|bear|grizzly|mammoth|deer|moose|elk|horse|dog|monkey|chimp|owl|eagle)\b", "#6b4423", "#ead2ac", "#d4a338", "#ff9f1c"),
+    (r"\b(silver|steel|iron|chrome|titanium|mech|mecha|robot|knight|paladin|cyborg|armor|armored|watchtower|castle|fortress|stone)\b", "#4a5568", "#cbd5e1", "#f5c518", "#00e5ff"),
+    (r"\b(gorilla|ape|kong|black|obsidian|panther|raven|crow|bat|spider|scorpion)\b", "#182232", "#e8dfd1", "#f5c518", "#ff2a2a"),
+]
+
+
+def infer_subject_palette(prompt: str, cat: str) -> Tuple[str, str, str, str]:
+    p_low = prompt.lower()
+    for pat, b_col, s_col, t_col, a_col in _PROMPT_COLOR_MAP:
+        if re.search(pat, p_low):
+            return b_col, s_col, t_col, a_col
+    if cat == "vehicle":
+        return "#c1121f", "#e5e7eb", "#f5c518", "#00e5ff"
+    if cat == "structure":
+        return "#64748b", "#e2e8f0", "#d97706", "#fbbf24"
+    if cat == "plant":
+        return "#2d6a4f", "#74c69d", "#7f4f24", "#ffb703"
+    if cat == "humanoid":
+        return "#334155", "#e2e8f0", "#f5c518", "#00e5ff"
+    return "#243447", "#e8dfd1", "#f5c518", "#ff2a2a"
 
 
 def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any], prompt: str, cat: str) -> None:
     p_low = prompt.lower()
     is_ape = any(w in p_low for w in ("gorilla", "ape", "monkey", "kong", "primate", "baboon", "orangutan", "chimpanzee"))
-    base = str(palette.get("base") or "#141c28").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", base):
-        base = "#141c28"
+    def_base, def_sec, def_trim, def_acc = infer_subject_palette(prompt, cat)
 
-    bh, bl, bs = _hex_to_hls(base)
+    base = str(palette.get("base") or "").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", base) or (not is_ape and base in ("#141c28", "#8aa0b0", "#5f9a78")):
+        base = def_base
     if is_ape:
-        base = "#141c28"
-        bh, bl, bs = _hex_to_hls(base)
+        base = "#182232"
+    bh, bl, bs = _hex_to_hls(base)
 
     sec = str(palette.get("secondary") or "").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", sec) or _color_dist(base, sec) < 0.32 or _hex_to_hls(sec)[1] < 0.60:
-        if is_ape or any(w in p_low for w in ("bear", "wolf", "lion", "dog", "cat", "rex", "dino", "dragon")):
-            sec = "#e8dfd1"
-        else:
-            sec = _hls_to_hex((bh + 0.08) % 1.0, 0.82, 0.35)
+    if not re.fullmatch(r"#[0-9a-f]{6}", sec) or _color_dist(base, sec) < 0.28:
+        sec = def_sec
 
-    trim = str(palette.get("trim") or "#f5c518").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", trim) or _color_dist(base, trim) < 0.28:
-        trim = "#f5c518"
+    trim = str(palette.get("trim") or "").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", trim) or _color_dist(base, trim) < 0.24:
+        trim = def_trim
 
-    accent = str(palette.get("accent") or "#ff2a2a").lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", accent) or _color_dist(base, accent) < 0.25:
-        accent = "#ff2a2a"
+    accent = str(palette.get("accent") or "").lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", accent) or _color_dist(base, accent) < 0.22:
+        accent = def_acc
 
     light = "#ffffff"
     dark = "#0b0e14"
@@ -1104,6 +1090,7 @@ def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any],
 
     for p in parts:
         pid = p["id"]
+        c_cur = str(p.get("color") or "").lower()
         if _ZONE_TONGUE.search(pid):
             p["color"] = "#d95b72"
         elif _ZONE_WHITE_LIGHT.search(pid):
@@ -1116,23 +1103,20 @@ def enforce_color_blocking(parts: List[Dict[str, Any]], palette: Dict[str, Any],
             p["color"] = trim
         elif _ZONE_SKIN_CHEST.search(pid) and not re.search(r"cranium|skull|ruff|chin_fur|back|shoulder|pauldron|bicep|forearm|thigh|shin|hand_l|hand_r|foot_l|foot_r", pid, re.I):
             p["color"] = sec
-        elif is_ape and _ZONE_FORCE_BASE.search(pid):
-            if re.search(r"pauldron|tuft|ruff|back_silver|saddle", pid, re.I):
-                p["color"] = _hls_to_hex(bh, min(0.24, bl + 0.05), max(0.22, bs))
+        elif _ZONE_FORCE_BASE.search(pid) or c_cur in ("#8aa0b0", "#5f9a78", "#141c28"):
+            if re.search(r"pauldron|tuft|ruff|back_silver|saddle|wing_membrane|cape|cloak|fin|roof|canopy", pid, re.I):
+                p["color"] = _hls_to_hex(bh, min(0.68, max(0.22, bl + 0.08)), max(0.25, bs))
             else:
                 p["color"] = base
 
 
-# --------------------------------------------------------------------------- NEW in v19: Automatic Monolith-to-Multi-Slab Sculptor & Hollow Face Builder
+# --------------------------------------------------------------------------- Automatic Monolith-to-Multi-Slab Sculptor & Hollow Face Builder
 _SUBDIVIDE_LIMB = re.compile(r"bicep|forearm|upperarm|lowerarm|thigh|shin|calf", re.I)
 _SUBDIVIDE_TORSO = re.compile(r"^torso_(?:upper|mid|core|main|body)$|^body_core$|^chest_core$", re.I)
 _SUBDIVIDE_BRACER = re.compile(r"bracer|cuff", re.I)
 
 
 def subdivide_monoliths_into_slabs(parts: List[Dict[str, Any]], cat: str) -> Tuple[List[Dict[str, Any]], int]:
-    """Whenever the AI outputs a single tall block for a bicep, forearm, thigh, torso, or wrist bracer,
-    this 3D cloud pass automatically slices it into 3 to 4 stepped horizontal brick slabs with subtle
-    barrel/taper contouring so it looks like a real multi-part Roblox sculpture instead of 1 scaled cube!"""
     if cat not in ("creature", "humanoid"):
         return parts, 0
 
@@ -1145,11 +1129,10 @@ def subdivide_monoliths_into_slabs(parts: List[Dict[str, Any]], cat: str) -> Tup
         sx, sy, sz = p["size"]
         px, py, pz = p["pos"]
 
-        # 1. Slice single tall Bicep / Forearm / Thigh / Shin blocks into 3 tapered muscular brick slabs
         if p["shape"] == "box" and _SUBDIVIDE_LIMB.search(pid) and not re.search(r"slab|seg|ring|\d$", pid, re.I) and sy >= 4.2 and len(out) + len(parts) < MAX_PARTS - 12:
             n_slabs = 3
             slab_h = (sy / n_slabs) * 1.06
-            profiles = (0.94, 1.04, 0.90)  # barrel muscle contour
+            profiles = (0.94, 1.04, 0.90)
             for k in range(n_slabs):
                 y_off = (k - (n_slabs - 1) / 2.0) * (sy / n_slabs)
                 scale_xz = profiles[k]
@@ -1169,7 +1152,6 @@ def subdivide_monoliths_into_slabs(parts: List[Dict[str, Any]], cat: str) -> Tup
             added_slabs += n_slabs - 1
             continue
 
-        # 2. Slice single thick Wrist Bracer / Cuff blocks into 3 stepped golden rings
         if p["shape"] == "box" and _SUBDIVIDE_BRACER.search(pid) and not re.search(r"ring|top|bot|upper|lower|\d$", pid, re.I) and sy >= 2.0 and len(out) + len(parts) < MAX_PARTS - 8:
             n_rings = 3
             ring_h = (sy / n_rings) * 0.92
@@ -1192,11 +1174,10 @@ def subdivide_monoliths_into_slabs(parts: List[Dict[str, Any]], cat: str) -> Tup
             added_slabs += n_rings - 1
             continue
 
-        # 3. Slice single giant Torso blocks into 3 V-tapered horizontal slabs
         if p["shape"] == "box" and _SUBDIVIDE_TORSO.search(pid) and sy >= 6.0 and len(out) + len(parts) < MAX_PARTS - 10:
             n_slabs = 3
             slab_h = (sy / n_slabs) * 1.05
-            tapers = (0.86, 0.96, 1.04)  # bottom narrow -> top wide V-taper
+            tapers = (0.86, 0.96, 1.04)
             for k in range(n_slabs):
                 y_off = (k - 1) * (sy / n_slabs)
                 t_scale = tapers[k]
@@ -1221,11 +1202,6 @@ def subdivide_monoliths_into_slabs(parts: List[Dict[str, Any]], cat: str) -> Tup
 
 
 def build_3d_hollow_face(parts: List[Dict[str, Any]], palette: Dict[str, Any], cat: str) -> int:
-    """Fixes the 'flat white wall faceplate' bug seen in Screenshot 534!
-    1. Shrinks any oversized flat FacePlate so it only covers the upper eye/forehead bridge, OR splits it
-       into Left & Right Cheek Pillars framing a real recessed dark Mouth Pit.
-    2. Angles `Head_Brow_L` and `Head_Brow_R` into a fierce overhanging V-scowl (`rot Z = -15 / +15`).
-    3. Ensures the dark `Mouth_Pit`, pink `Tongue`, and upper/lower `Fang`/`Tooth` rows sit cleanly inside the frame."""
     if cat not in ("creature", "humanoid"):
         return 0
 
@@ -1242,7 +1218,6 @@ def build_3d_hollow_face(parts: List[Dict[str, Any]], palette: Dict[str, Any], c
         return 0
 
     cranium_front_z = max(p["pos"][2] + p["size"][2] * 0.5 for p in craniums)
-    cranium_mid_y = sum(p["pos"][1] for p in craniums) / len(craniums)
     sec_col = palette.get("secondary", "#e8dfd1")
     dark_col = palette.get("dark", "#0b0e14")
     accent_col = palette.get("accent", "#ff2a2a")
@@ -1250,8 +1225,6 @@ def build_3d_hollow_face(parts: List[Dict[str, Any]], palette: Dict[str, Any], c
     fixed = 0
     existing_ids = {p["id"] for p in parts}
 
-    # If there is a tall flat FacePlate covering both the eyes AND the mouth, convert it into an Upper Eye Bridge
-    # and spawn Left/Right Cheek Pillars so the mouth cavity is framed in 3D instead of covered by a white wall!
     for p in list(parts):
         pid = p["id"]
         if re.search(r"faceplate|face_plate|faceupper", pid, re.I) and p["size"][1] >= 3.2:
@@ -1273,7 +1246,6 @@ def build_3d_hollow_face(parts: List[Dict[str, Any]], palette: Dict[str, Any], c
                     })
                     fixed += 1
 
-    # Ensure Brows have a fierce V-angle scowl and overhang the eyes
     for p in parts:
         pid = p["id"]
         if re.search(r"brow", pid, re.I):
@@ -1284,7 +1256,6 @@ def build_3d_hollow_face(parts: List[Dict[str, Any]], palette: Dict[str, Any], c
                 p["rot"][2] = 15.0
             fixed += 1
 
-    # Ensure Glowing Eyes are wide fierce slits sitting directly under the brows
     for p in parts:
         pid = p["id"]
         if re.search(r"(?:^|_)eye(?:_|$|\d)", pid, re.I) and not re.search(r"pupil|brow|socket", pid, re.I):
@@ -1298,7 +1269,6 @@ def build_3d_hollow_face(parts: List[Dict[str, Any]], palette: Dict[str, Any], c
                 p["rot"][2] = 10.0
             fixed += 1
 
-    # Step Upper Muzzle & Lower Jaw forward, and recess dark Mouth Pit between them
     muzzle_z = cranium_front_z + 1.15
     for p in parts:
         pid = p["id"]
@@ -1693,7 +1663,7 @@ def analyze(parts: List[Dict[str, Any]], cat: str, sub: str, lo: int, hi: int, p
     distinct_cols = len(color_counts)
     max_col_share = max(color_counts.values()) / max(n, 1) if color_counts else 1.0
     if distinct_cols < 4 or max_col_share > 0.72:
-        add("MONOCHROME", f"the coloring is too monochrome ({distinct_cols} distinct color bucket(s)). Use cream/tan `secondary` on chest slabs/face frame/fingers/toes, gold `trim` on 4-ring bracers/crown, bright `accent` on eyes, and white `light` on teeth!",
+        add("MONOCHROME", f"the coloring is too monochrome ({distinct_cols} distinct color bucket(s)). Use contrasting `secondary` on chest slabs/face frame/fingers/toes, gold `trim` on bracers/crown, bright `accent` on eyes, and white `light` on teeth!",
             True, 16)
 
     box_n = sum(1 for p in parts if p["shape"] == "box")
@@ -1723,8 +1693,9 @@ def process_build(data: Dict[str, Any], cat: str, sub: str, lo: int, hi: int, pr
     if not isinstance(data["plan"].get("palette"), dict):
         data["plan"]["palette"] = {}
     palette = data["plan"]["palette"]
-    base = str(palette.get("base", "#141c28"))
-    parts = normalize_ops(raw, unit, base if re.fullmatch(r"#[0-9a-fA-F]{6}", base) else "#141c28", cat, sub)
+    def_base, _, _, _ = infer_subject_palette(prompt, cat)
+    base = str(palette.get("base", def_base))
+    parts = normalize_ops(raw, unit, base if re.fullmatch(r"#[0-9a-fA-F]{6}", base) else def_base, cat, sub)
     if len(parts) < 3:
         raise ValueError("The AI returned fewer than 3 usable parts.")
     enforce_roblox_budget(parts, cat)
@@ -1828,7 +1799,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 def _pick_db_path() -> Path:
     want = os.getenv("MEMORY_DB", "")
     candidates = [Path(want)] if want else []
-    if Path("/var/data").is_dir():                     # Render persistent disk mount
+    if Path("/var/data").is_dir():
         candidates.append(Path("/var/data/verdant_memory.db"))
     candidates += [Path(__file__).parent / "data" / "verdant_memory.db", Path("/tmp/verdant_memory.db")]
     for c in candidates:
@@ -1844,9 +1815,6 @@ def _pick_db_path() -> Path:
 
 
 class MemoryStore:
-    """Shared library: prompt -> finished model. One SQLite file, safe for many users at once.
-    Keys are per variant ("classic" blocks vs "depth3d" hulls); every row remembers the AI effort it was built with."""
-
     def __init__(self) -> None:
         self.path = _pick_db_path()
         self.lock = threading.RLock()
@@ -1860,7 +1828,7 @@ class MemoryStore:
                     flags INTEGER DEFAULT 0, parent_id TEXT, created REAL, last_used REAL, engine TEXT);
                 CREATE INDEX IF NOT EXISTS idx_models_used ON models(uses DESC);
             """)
-            try:                                  # v22 migration; harmless when the column already exists
+            try:
                 self.db.execute("ALTER TABLE models ADD COLUMN effort TEXT DEFAULT 'mid'")
             except sqlite3.OperationalError:
                 pass
@@ -1894,7 +1862,6 @@ class MemoryStore:
         return len(self.index)
 
     def find(self, tokens: frozenset, variant: str = "classic") -> Tuple[str, Optional[Dict[str, Any]], List[str], List[str]]:
-        """-> (mode, entry, added_words, dropped_words); mode is 'exact', 'variant' or 'none'."""
         if not tokens:
             return "none", None, [], []
         best_exact, best_var = None, None
@@ -1958,7 +1925,7 @@ class MemoryStore:
                 " VALUES(?,?,?,?,?,?,?,?,0,0,?,?,?,?,?)",
                 (mid, key, prompt[:300], category, title, body, nparts, int(score), parent_id or None, now, now,
                  engine[:80], effort))
-            if cur.rowcount == 0:                       # same key already stored
+            if cur.rowcount == 0:
                 r = self.db.execute("SELECT id,effort,flags FROM models WHERE key=?", (key,)).fetchone()
                 if not r:
                     self.db.commit()
@@ -2058,7 +2025,7 @@ async def ask_and_parse(system: str, user: str, provider: str, model: str, api_k
         except ProviderError as e:
             raise e.to_http()
         data = parse_llm_json(text)
-        if isinstance(data.get("ops") or data.get("parts"), list) and (data.get("ops") or data.get("parts")):
+        if isinstance(data.get("ops") or data.get("parts") or data.get("hulls"), list) and (data.get("ops") or data.get("parts") or data.get("hulls")):
             return data, engine
         last = ValueError("The AI answer contained no parts.")
     raise HTTPException(status_code=422, detail=str(last))
@@ -2093,17 +2060,17 @@ class GenerateRequest(BaseModel):
     revise: Optional[bool] = None
     max_revisions: Optional[int] = None
     tonal_variation: bool = True
-    effort: Optional[str] = "mid"          # low | mid | high | extra
-    variant: Optional[str] = "classic"     # classic (Roblox bricks) | depth3d (low-poly hull workspace)
-    use_memory: bool = True        # look the prompt up in the shared library first
-    publish: bool = True           # save the result to the shared library
-    fresh: bool = False            # skip memory and force a brand-new AI build
+    effort: Optional[str] = "mid"
+    variant: Optional[str] = "classic"
+    use_memory: bool = True
+    publish: bool = True
+    fresh: bool = False
 
 
 class ReviseRequest(BaseModel):
     instruction: str
     ops: List[Dict[str, Any]] = []
-    hulls: Optional[List[Dict[str, Any]]] = None     # Depth 3D: the model currently in the workspace
+    hulls: Optional[List[Dict[str, Any]]] = None
     variant: Optional[str] = "classic"
     effort: Optional[str] = "mid"
     prompt: Optional[str] = ""
@@ -2121,14 +2088,14 @@ class TestKeyRequest(BaseModel):
     model: Optional[str] = ""
 
 
-Progress = Any  # callable(str, str="") -> None
+Progress = Any
 
 
 def _noop(msg: str, kind: str = "") -> None:
     return None
 
 
-# --------------------------------------------------------------------------- Depth 3D: low-poly convex volumes
+# --------------------------------------------------------------------------- Depth 3D: universal standable low-poly convex volumes
 def _vsub(a, b):
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
@@ -2193,7 +2160,7 @@ def hull_volume(pts, faces) -> float:
     return abs(v)
 
 
-def _hex6(c: Any, default: str = "#8aa0b0") -> str:
+def _hex6(c: Any, default: str = "#243447") -> str:
     c = str(c or "").strip()
     if re.fullmatch(r"#[0-9a-fA-F]{6}", c):
         return c.lower()
@@ -2203,7 +2170,7 @@ def _hex6(c: Any, default: str = "#8aa0b0") -> str:
 
 
 def _mirror_id(pid: str) -> str:
-    m = re.search(r"(^|_)([LR])(?=_|\d|$)", pid)          # Arm_L, Tentacle_L_1, Eye_R2 ...
+    m = re.search(r"(^|_)([LR])(?=_|\d|$)", pid)
     if m:
         i = m.start(2)
         return pid[:i] + ("R" if m.group(2) == "L" else "L") + pid[i + 1:]
@@ -2214,12 +2181,59 @@ def _mirror_id(pid: str) -> str:
     return pid + "_mirror"
 
 
+def _sculpted_points_from_box(size: List[float], pos: List[float], rot: List[float], shape: str = "box") -> List[Tuple[float, float, float]]:
+    """Converts a [w,h,d] primitive into a 12-point faceted low-poly volume in model space so any Classic
+    [id, shape, size, pos, rot, color] row becomes a genuine beveled low-poly convex hull."""
+    w, h, d = max(0.14, float(size[0])), max(0.14, float(size[1])), max(0.14, float(size[2]))
+    cx, cy, cz = float(pos[0]), float(pos[1]), float(pos[2])
+    rm = rot_matrix(rot)
+
+    def xform(lx: float, ly: float, lz: float) -> Tuple[float, float, float]:
+        rx = rm[0][0] * lx + rm[0][1] * ly + rm[0][2] * lz + cx
+        ry = rm[1][0] * lx + rm[1][1] * ly + rm[1][2] * lz + cy
+        rz = rm[2][0] * lx + rm[2][1] * ly + rm[2][2] * lz + cz
+        return (round(rx, 3), round(ry, 3), round(rz, 3))
+
+    hx, hy, hz = w * 0.5, h * 0.5, d * 0.5
+    if shape == "cone":
+        return [
+            xform(-hx, -hy, -hz), xform(hx, -hy, -hz), xform(hx, -hy, hz), xform(-hx, -hy, hz),
+            xform(0.0, -hy, hz * 1.12), xform(0.0, hy, 0.0)
+        ]
+    return [
+        xform(-hx * 0.82, -hy, -hz * 0.82), xform(hx * 0.82, -hy, -hz * 0.82),
+        xform(hx * 0.85, -hy, hz * 0.85),   xform(-hx * 0.85, -hy, hz * 0.85),
+        xform(-hx * 1.04, 0.0, 0.0),        xform(hx * 1.04, 0.0, 0.0),
+        xform(0.0, 0.0, hz * 1.06),         xform(0.0, 0.0, -hz * 1.04),
+        xform(-hx * 0.86, hy, -hz * 0.84),  xform(hx * 0.86, hy, -hz * 0.84),
+        xform(hx * 0.88, hy, hz * 0.88),    xform(-hx * 0.88, hy, hz * 0.88),
+    ]
+
+
+def _bevel_if_plain_cube(pts: List[Tuple[float, float, float]]) -> List[Tuple[float, float, float]]:
+    if len(pts) != 8:
+        return pts
+    xs, ys, zs = [p[0] for p in pts], [p[1] for p in pts], [p[2] for p in pts]
+    x0, x1, y0, y1, z0, z1 = min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)
+    dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
+    if min(dx, dy, dz) < 1e-3:
+        return pts
+    cx, cy, cz = (x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5
+    inset = [((x - cx) * 0.86 + cx, y, (z - cz) * 0.86 + cz) for (x, y, z) in pts]
+    equator = [
+        (cx - dx * 0.53, cy, cz), (cx + dx * 0.53, cy, cz),
+        (cx, cy, cz + dz * 0.54), (cx, cy, cz - dz * 0.53),
+        (cx, y1 + dy * 0.04, cz), (cx, y0 - dy * 0.02, cz),
+    ]
+    return [(round(x, 3), round(y, 3), round(z, 3)) for (x, y, z) in (inset + equator)]
+
+
 def _clean_points(pts: Any) -> List[Tuple[float, float, float]]:
     out, seen = [], set()
     if not isinstance(pts, (list, tuple)):
         return out
     for p in pts[:64]:
-        if isinstance(p, (list, tuple)) and len(p) == 3:
+        if isinstance(p, (list, tuple)) and len(p) == 3 and not isinstance(p[0], (list, tuple)):
             try:
                 q = tuple(round(max(-40.0, min(40.0, float(v))), 3) for v in p)
             except (TypeError, ValueError):
@@ -2230,55 +2244,82 @@ def _clean_points(pts: Any) -> List[Tuple[float, float, float]]:
     return out
 
 
-DEPTH_SKILL = """You are the VERDANT DEPTH 3D SCULPTOR: a senior low-poly game artist.
-You build models as CONVEX VOLUMES ("hulls"). Every part is the convex hull of a small list of 3D points and is rendered flat-shaded, like polished stylised low-poly game art. There are no boxes, spheres or textures - only points, so YOUR POINTS ARE THE SCULPT.
+DEPTH_SKILL = """You are the VERDANT DEPTH 3D SCULPTOR: a senior low-poly 3D game artist.
+You build models as CONVEX VOLUMES ("hulls"). Every part is the convex hull of 6-12 3D points and is rendered flat-shaded, like bespoke low-poly studio game art.
 
 OUTPUT - reply with ONE valid JSON object and nothing else (no markdown, no comments, no prose):
 {
   "title": "short model name",
   "category": "creature|humanoid|vehicle|structure|plant|prop",
-  "plan": {"silhouette": "one sentence", "palette": {"base":"#hex","secondary":"#hex","accent":"#hex","dark":"#hex"}, "signature_features": ["..."]},
+  "plan": {
+    "silhouette": "one sentence describing wide 3D stance, posture, and proportions",
+    "palette": {"base":"#hex","secondary":"#hex","trim":"#hex","accent":"#hex","dark":"#0b0e14","light":"#ffffff"},
+    "signature_features": ["..."]
+  },
   "parts": [
-    ["Torso", "#6a3fa0", [[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z]], 0],
-    ["Arm_L", "#6a3fa0", [[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z]], 1]
+    ["Torso_Upper", "#b81d18", [[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z]], 0],
+    ["Shoulder_L", "#b81d18", [[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z]], 1]
   ]
 }
-Every part is ONE ROW: [id, "#rrggbb", points, mirror]. `points` are triples [x,y,z] in MODEL space (one shared coordinate system for the whole model, 2 decimals). `mirror` = 1 asks the server to write the twin across the X axis (left/right), so NEVER write both sides yourself; use 0 for centred parts.
+Every part in `"parts"` is ONE ROW: `[id, "#rrggbb", points, mirror]`.
+- `points` are `[x,y,z]` triples in MODEL space (one shared coordinate system for the whole model, 2 decimals).
+- `mirror` = 1 tells the server to mirror the twin across the X=0 plane (`_L` -> `_R`), so author the `+X` side with `mirror=1` and NEVER write both sides yourself; use `0` for centered parts (`X=0`).
 
-COORDINATES: Y is up. The model stands on y=0, is centred on x=0 and z=0 and faces +Z. Author the +X side and mirror it. The largest dimension should be about 5 units (the server rescales, so proportions are what matter).
+UNIVERSAL 3D SCULPTING & STANDING LAWS (FOLLOW STRICTLY FOR ALL SUBJECTS):
+1. WIDE, STANDABLE 3D SILHOUETTE (NEVER STACK PARTS INTO A TOTEM POLE AT X=0!):
+   - Center the spine/torso/chassis on `X = 0`, facing `+Z`, standing firmly on the ground at `Y = 0`.
+   - ALWAYS place bilateral parts (`Shoulder_L`, `Arm_L`, `Bicep_L`, `Forearm_L`, `Hand_L`, `Thigh_L`, `Shin_L`, `Foot_L`, `Wing_L`, `Tentacle_L`, `Wheel_FL`, `Turret_L`) well out on `+X` (`X = +0.7 to +2.8`) with `mirror = 1`!
+   - Never put left/right limbs, wheels, wings, or tentacles on `X = 0`.
+2. MULTI-TONE SUBJECT-APPROPRIATE PALETTE (NEVER MONOCHROME):
+   - Match the real colors of the prompt (`base` for main body/paint/scales/fur/stone, contrasting `secondary` `#e8dfd1` or cream/silver for chest/underbelly/snout/windows/fingers/toes, `trim` `#f5c518` for gold/metal cuffs/horns/rims/crown, `accent` for glowing eyes/fire/thrusters, `light` `#ffffff` for fangs/claws/headlights, `dark` `#0b0e14` for open mouth pit/tires).
+3. FACETED LOW-POLY VOLUMES (NO PLAIN CUBES):
+   - Every volume must TAPER, LEAN, or BEVEL: tapered 8-10 point limbs, 10-12 point faceted torso/head gems, 6-point wedges for snouts/jaws/blades/feathers, 5-point pyramids for horns/fangs/claws/roofs.
+4. SOLID JOINT OVERLAP & GROUNDING:
+   - Neighbouring segments must overlap by `0.08 - 0.18` units so nothing floats. Feet, tires, tentacles, or foundations rest cleanly on `Y = 0`.
 
-SCULPTING LAWS
-1. SILHOUETTE FIRST: block in the big masses (body, head, limbs, tail), then secondary forms (jaw, brow, shoulders, hips), then details (eyes, teeth, claws, spikes, trims).
-2. NEVER make cubes out of 8 identical corner points. Every volume must TAPER, LEAN or BEVEL:
-   - Tapered limb: a wide ring of 4 points on top, a narrower ring of 4 below, slightly offset for a lean.
-   - Faceted blob (head, torso, belly): an apex above, an apex below and 1-2 rings of 5-6 points between them with different radii - a low-poly gem.
-   - Wedge (snout, jaw, fin, blade): 6 points, a thick back face and a thin front edge.
-   - Spike / horn / claw: a ring of 3-4 base points plus 1 apex point.
-   - Plate / disc (wings, shields, fins): a thin hull of 6-8 points with real thickness (at least 0.06).
-3. EVERY HULL NEEDS VOLUME: points must not all lie in one plane or on one line, and no two points may be identical.
-4. CONNECT EVERYTHING: neighbouring parts overlap by 0.05-0.15 at the joints so nothing floats. Feet touch y=0.
-5. COLOUR BLOCKING: 3-6 colours in total: a dominant base, a secondary for belly/inner shapes, a contrasting accent for eyes/trim/horns, a darker tone for mouth and joints. The same body part keeps the same colour.
-6. Name every part clearly (Head, Jaw, Eye_L, Horn_L, Tentacle_L_1 ...). Left parts end in _L (they sit on +X).
-7. Be concise: never repeat or pad rows, never explain.
-
-TARGET: @LO@-@HI@ parts and @PMIN@-@PMAX@ points per part (mirrored twins are free).
+TARGET: @LO@-@HI@ parts and @PMIN@-@PMAX@ points per part (mirrored `_R` twins are added automatically for free).
 """
 
 DEPTH_HINTS = {
-    "creature": "CREATURE: big body mass, a distinct head with a snout/beak/jaw, limbs that taper to feet/paws/claws, tail or tentacles tapering to a point, eyes in the accent colour.",
-    "humanoid": "HUMANOID: chest wider than waist, tapered upper/lower limbs, shoulders and hips as separate hulls, hands and feet as wedges, a faceted helmet or head, armour plates as thin hulls.",
-    "vehicle": "VEHICLE: a long lower hull, a tapered cabin, wheels as 8-point discs with real thickness at ground level, bumpers and lights as small wedges.",
-    "structure": "STRUCTURE: a stepped base, tapered towers, roofs as 5-point pyramids, windows and doors as thin dark hulls slightly proud of the wall.",
-    "plant": "PLANT: a tapered trunk, canopy built from several overlapping faceted blobs, roots as wedges.",
-    "prop": "PROP: a clear main form with chamfered edges, then trims and handles as small hulls in contrasting colours.",
+    "creature_quad": """CREATURE / BEAST / APE / QUADRUPED IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Spine & Torso (mirror=0): `Pelvis` (x=-0.9..0.9, y=1.2..2.1, z=-0.6..0.5), `Torso_Mid` (x=-1.2..1.2, y=2.0..3.3, z=-0.7..0.8), `Torso_Upper` (x=-1.6..1.6, y=3.1..4.5, z=-0.8..1.0), plus contrasting `secondary` `Chest_Pec_L` (mirror=1, x=0.15..1.35, y=3.3..4.3, z=0.8..1.25) and 3 stepped `Belly_Slab_1..3` hulls on +Z.
+- Head & Hollow Roaring Jaw (y=4.3..5.6, z=0.5..2.0): `Head_Cranium` (`base`), angled `Head_Brow_L` (mirror=1, `secondary`), glowing `Eye_L` (mirror=1, `accent`), `Head_Snout` (`secondary`), dark `Head_Mouth_Pit` (`#0b0e14`), `Head_Lower_Jaw` (`secondary`), and 4 `Fang_*` pyramids (`#ffffff`, mirror=1).
+- Wide Muscular Arms & Hands (mirror=1, placed OUT at X = +1.4 .. +2.7!): `Shoulder_L` (x=1.2..2.1, y=3.6..4.5), `Pauldron_L_1..2`, `Bicep_L` (x=1.5..2.4, y=2.5..3.7), `Forearm_L` (x=1.6..2.6, y=1.3..2.6, z=0.4..1.4), `Bracer_Cuff_L` (`trim`), `Hand_Palm_L` (x=1.6..2.7, y=0.3..1.4, z=0.7..1.7), plus 4 `Finger_L_1..4` and `Thumb_L` (`secondary`).
+- Wide Stance Legs & Toes (mirror=1, placed at X = +0.55 .. +1.35): `Thigh_L` (x=0.55..1.35, y=0.9..2.0), `Shin_L` (x=0.6..1.3, y=0.25..1.0), `Foot_L` (y=0.0..0.35), and 3 `Toe_L_1..3` (`secondary`) on y=0.""",
+    "creature_dragon": """DRAGON / WYVERN / WINGED BEAST IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- S-curved neck (`Neck_1..3`), broad chest & body (`Torso_Front`, `Torso_Mid`, `Pelvis`) with 6 stepped cream/gold `Belly_Scute_1..6` plates (`secondary`) along the front/underside, and a long 5-segment tapering `Tail_1..5` sweeping back to Z = -3.8 with dorsal `Spine_Spike_1..6`.
+- Fierce sculpted Dragon Head at (y=4.2..5.4, z=1.2..2.8): `Head_Skull`, swept `Horn_L_1..2` (mirror=1, `trim`), overhanging `Brow_L` (mirror=1), glowing `Eye_L` (mirror=1, `accent`), `Upper_Snout`, dark `Mouth_Pit`, hinged `Lower_Jaw`, and white `Fang_L_1..3` (mirror=1).
+- 2 Massive Wings (mirror=1, spreading wide from X = +0.9 out to X = +3.6, Y = 3.2..5.8): `Wing_Shoulder_L`, `Wing_Arm_L1..2`, `Wing_ThumbClaw_L`, and 3 wide thin faceted membrane plates `Wing_Membrane_L1..3` (`secondary`/`accent`).
+- 4 Powerful Legs & Talons (mirror=1, at X = +0.7..+1.5): `Thigh_L`, `Shin_L`, `Foot_L`, and 3 sharp white `Claw_L_1..3` grounded at y=0.""",
+    "creature_multi": """KRAKEN / SQUID / OCTOPUS / ARACHNID IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Tall faceted Bulbous Mantle/Dome (`Mantle_Base`, `Mantle_Mid`, `Mantle_Crown`, `Mantle_Fin_L` with mirror=1) rising to y=5.2, overhanging `Brow_L` (mirror=1), large glowing `Eye_L` (mirror=1, `accent`), dark `Mouth_Beak` at the lower front, and contrasting `secondary` under-mantle plates.
+- 8 Radial Multi-Segment Tentacles / Legs (`Tentacle_L1_Seg1..3`, `Tentacle_L2_Seg1..3`, `Tentacle_L3_Seg1..3`, `Tentacle_L4_Seg1..3`, all with `mirror=1`) fanning wide outward across X = +0.6 .. +3.2 and Z = -2.5 .. +2.5 on the ground (y=0..1.4) with `secondary` sucker/claw accents.""",
+    "creature_bird": """BIRD / PHOENIX / GRIFFIN IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Proud angled breast (`Breast_Upper`, `Breast_Lower`) with layered `Plumage_Slab_1..4` (`secondary`), `Head_Skull` with 3-part `Crest_1..3` (`accent`/`trim`), hooked 2-part golden `Beak_Upper` & `Beak_Lower` (`trim`), glowing `Eye_L` (mirror=1, `accent`), wide 3-section feathered `Wing_L_1..3` (mirror=1, X = +0.8..+3.4), fanned `Tail_Feather_1..5`, and taloned `Leg_L` + `Talon_L_1..3` (mirror=1) at y=0.""",
+    "creature_aquatic": """SHARK / WHALE / LEVIATHAN IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- 6-segment streamlined tapering body along Z = +2.4 .. -2.8 (`Body_1..6`) with dark/vivid dorsal top (`base`) and crisp `secondary` cream/white `Belly_1..5` counter-shading underneath, open jaws (`Upper_Jaw`, `Lower_Jaw`, `Mouth_Pit`, white `Tooth_L_1..4` mirror=1), glowing `Eye_L` (mirror=1), tall `Dorsal_Fin`, wide `Pectoral_Fin_L` (mirror=1, X = +0.8..+2.6), and twin `Tail_Fluke_L` / `Upper`.""",
+    "humanoid": """HUMANOID / MECH / KNIGHT IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- V-tapered `Pelvis`, `Waist`, and `Chest_Core` (`base`) with contrasting `Chest_Plate_L` (mirror=1, `secondary`), glowing `Chest_Core_Gem` (`accent`), and golden `Belt_Buckle` (`trim`).
+- Sculpted `Head_Helm` with recessed dark `Visor_Slit`, glowing `Eye_L` (mirror=1, `accent`), and `Crown_Or_Crest` (`trim`).
+- Wide `Pauldron_L_1..2` (mirror=1, X = +1.1..+1.9), articulated `Bicep_L`, `Forearm_L`, golden `Gauntlet_Cuff_L` (`trim`), `Hand_L` (mirror=1, X = +1.3..+2.0) + handheld weapon/shield, and wide-stance `Thigh_L`, `Knee_Guard_L`, `Shin_L`, `Boot_L` (mirror=1, X = +0.55..+1.15) standing on y=0.""",
+    "vehicle": """VEHICLE / SUPERCAR / AIRCRAFT / SHIP IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Wide low-slung sculpted chassis (`Chassis_Center`, `Front_Hood`, `Rear_Deck`, `Side_Skirt_L` mirror=1 across X = ±1.4, Z = -2.4..+2.4), tapered `Cabin_Windshield` & `Roof` (`secondary`), dark `Front_Splitter` & `Rear_Diffuser` (`dark`), `Spoiler_Wing` + `Spoiler_Strut_L` (mirror=1), 4 wide cylindrical/octagonal `Wheel_FL` & `Wheel_RL` tires (`dark`, mirror=1 at X = +1.35, Z = ±1.55) with golden `Rim_FL` & `Rim_RL` (`trim`, mirror=1), `Headlight_L` (`light`, mirror=1), and glowing `Taillight_L` (`accent`, mirror=1).""",
+    "structure": """STRUCTURE / WATCHTOWER / CASTLE / SHRINE IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Wide stepped stone foundation (`Base_Plinth_1..2`, X = -2.2..2.2, Z = -2.2..2.2, Y = 0..0.8), tapered main tower/walls (`Wall_Core`, `Corner_Pillar_FL` & `RL` mirror=1), recessed arched `Doorway_Frame` & `Door_Arch` on +Z, overhanging `Battlement_Ring` & crenelations (`Merlon_L1..3` mirror=1), pitched pyramid/conical `Roof_Spire` (`trim`/`secondary`), and glowing `Window_L` / `Lantern_L` (`accent`, mirror=1).""",
+    "plant": """PLANT / TREE / FANTASY FLORA IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Wide mossy island/rock base (`Base_Earth`, `Root_Flare_L1..2` mirror=1) on y=0, 4-part organic curved trunk & primary branches (`Trunk_1..3`, `Branch_L1..2` mirror=1), and 10-16 overlapping faceted crystal/foliage canopy volumes (`Canopy_Center`, `Canopy_Cluster_L1..5` mirror=1) spread wide across X = ±2.2, Y = 2.4..5.2 in 3 rich shades (`base`, `secondary`, `trim`) with glowing `Fruit_Or_Blossom_L` (`accent`, mirror=1).""",
+    "prop": """PROP / WEAPON / ARTIFACT IN MODEL SPACE (Y=0 ground, +Z front, author +X side with mirror=1):
+- Bold multi-part silhouette using all color zones: `dark` grip/base, `trim` gold crossguard/brackets (`Guard_Wing_L` mirror=1), `base` core body, `secondary` beveled blade/inlay slabs, `light` razor edges/rivets, and `accent` glowing rune/gem core.""",
 }
 
 
-def build_depth_system_prompt(cat: str, prof: Dict[str, Any]) -> str:
+def build_depth_system_prompt(cat: str, sub: str, prof: Dict[str, Any]) -> str:
     lo, hi = prof["d3_parts"]
     pmin, pmax = prof["d3_pts"]
+    hint_key = f"creature_{sub}" if cat == "creature" and f"creature_{sub}" in DEPTH_HINTS else cat
+    hint = DEPTH_HINTS.get(hint_key, DEPTH_HINTS["prop"])
     return (DEPTH_SKILL.replace("@LO@", str(lo)).replace("@HI@", str(hi))
-            .replace("@PMIN@", str(pmin)).replace("@PMAX@", str(pmax)) + "\n" + DEPTH_HINTS.get(cat, DEPTH_HINTS["prop"]))
+            .replace("@PMIN@", str(pmin)).replace("@PMAX@", str(pmax)) + "\n" + hint)
 
 
 def hulls_to_rows(hulls: List[Dict[str, Any]]) -> List[List[Any]]:
@@ -2297,11 +2338,17 @@ def hulls_to_rows(hulls: List[Dict[str, Any]]) -> List[List[Any]]:
     return rows
 
 
-def build_depth_user_prompt(prompt: str, cat: str, prof: Dict[str, Any], web_ctx: str) -> str:
+def build_depth_user_prompt(prompt: str, cat: str, sub: str, prof: Dict[str, Any], web_ctx: str) -> str:
     lo, hi = prof["d3_parts"]
-    out = [f'SUBJECT: "{prompt}"', f"CATEGORY: {cat}",
-           f"Sculpt it as low-poly convex volumes: about {lo}-{hi} parts, {prof['d3_pts'][0]}-{prof['d3_pts'][1]} points each.",
-           EFFORT_PROMPT[prof["name"]]]
+    b_col, s_col, t_col, a_col = infer_subject_palette(prompt, cat)
+    out = [
+        f'SUBJECT: "{prompt}"',
+        f"CATEGORY: {cat}" + (f" ({sub})" if sub else ""),
+        f"Sculpt it as standable low-poly convex volumes: about {lo}-{hi} parts, {prof['d3_pts'][0]}-{prof['d3_pts'][1]} points each.",
+        f"SUGGESTED PALETTE FOR THIS SUBJECT: base={b_col}, secondary={s_col}, trim={t_col}, accent={a_col}, dark=#0b0e14, light=#ffffff.",
+        "IMPORTANT: Place all left/right limbs, wings, tentacles, wheels, or side towers out at X = +0.7 .. +2.8 with `mirror=1` so the model has a wide, balanced 3D stance and NEVER collapses into a thin line on X=0!",
+        EFFORT_PROMPT[prof["name"]],
+    ]
     if web_ctx:
         out.append("LIVE WEB REFERENCE (use it for anatomy, colours and proportions; do not copy text): " + web_ctx)
     return "\n".join(out)
@@ -2324,20 +2371,78 @@ def build_depth_revision_prompt(prompt: str, cat: str, prof: Dict[str, Any], hul
     return "\n".join(out)
 
 
-def process_hulls(data: Dict[str, Any], prof: Dict[str, Any], lo: int, hi: int) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+_BILATERAL_PART_RE = re.compile(
+    r"(?:arm|bicep|forearm|shoulder|pauldron|hand|palm|finger|thumb|bracer|cuff|gauntlet|leg|thigh|knee|shin|calf|foot|boot|toe|claw|talon|wing|tentacle|fin|wheel|tire|rim|headlight|taillight|eye|brow|cheek|horn|ear|tusk|fang)",
+    re.I,
+)
+
+
+def _auto_spread_bilateral_hulls(raw: List[List[Any]]) -> None:
+    """If an LLM accidentally puts bilateral limbs/wheels/wings/eyes on X=0 (totem pole bug),
+    automatically offset them outward along +X and turn on mirror=1 so the model stands wide in 3D!"""
+    existing_ids = {r[0] for r in raw}
+    for r in raw:
+        pid, col, pts, mir = r[0], r[1], r[2], r[3]
+        if not pts:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        is_lr = bool(re.search(r"(^|_)[LR](?=_|\d|$)|Left|Right", pid))
+        if (is_lr or _BILATERAL_PART_RE.search(pid)) and abs(cx) < 0.18:
+            sign = -1.0 if re.search(r"(^|_)R(?=_|\d|$)|Right", pid) else 1.0
+            if re.search(r"wing|tentacle", pid, re.I):
+                shift_x = 1.45 * sign
+            elif re.search(r"arm|bicep|forearm|hand|palm|finger|bracer|cuff|gauntlet|shoulder|pauldron|wheel|tire|rim", pid, re.I):
+                shift_x = 1.25 * sign
+            elif re.search(r"leg|thigh|knee|shin|calf|foot|boot|toe|claw|talon", pid, re.I):
+                shift_x = 0.72 * sign
+            else:
+                shift_x = 0.42 * sign
+            r[2] = [(round(x + shift_x, 3), y, z) for (x, y, z) in pts]
+            partner = _mirror_id(pid)
+            if partner not in existing_ids and sign > 0:
+                r[3] = True
+
+
+def process_hulls(data: Dict[str, Any], prof: Dict[str, Any], lo: int, hi: int,
+                  prompt: str = "", cat: str = "creature") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     rows = data.get("parts") or data.get("hulls") or data.get("ops") or []
     if not isinstance(rows, list) or not rows:
         raise ValueError("The AI answer contained no parts.")
+    if not isinstance(data.get("plan"), dict):
+        data["plan"] = {}
+    if not isinstance(data["plan"].get("palette"), dict):
+        data["plan"]["palette"] = {}
+    palette = data["plan"]["palette"]
+    def_base, _, _, _ = infer_subject_palette(prompt, cat)
+
     raw: List[List[Any]] = []
     dropped: List[str] = []
     for k, row in enumerate(rows[:400]):
+        pid, col, pts, mir = f"Part_{k + 1}", def_base, [], 0
         if isinstance(row, (list, tuple)) and len(row) >= 3:
-            pid, col, pts, mir = row[0], row[1], row[2], (row[3] if len(row) > 3 else 0)
+            if isinstance(row[1], str) and not str(row[1]).strip().startswith("#") and len(row) >= 4 and isinstance(row[2], (list, tuple)) and len(row[2]) == 3 and not isinstance(row[2][0], (list, tuple)):
+                pid = str(row[0])
+                shape = str(row[1]).lower()
+                sz = _vec3(row[2], (1, 1, 1))
+                po = _vec3(row[3], (0, 0, 0))
+                ro = _vec3(row[4], (0, 0, 0)) if len(row) > 4 and isinstance(row[4], (list, tuple)) else [0.0, 0.0, 0.0]
+                col = next((x for x in row[4:] if isinstance(x, str) and str(x).strip().startswith("#")), def_base)
+                pts = _sculpted_points_from_box(sz, po, ro, shape)
+                mir = 0
+            else:
+                pid, col, pts, mir = row[0], row[1], row[2], (row[3] if len(row) > 3 else 0)
         elif isinstance(row, dict):
-            pid, col = row.get("id") or row.get("name"), row.get("color") or row.get("c")
-            pts, mir = row.get("points") or row.get("p"), row.get("mirror") or row.get("m") or 0
-            pos, sc = row.get("pos"), row.get("scale")
-            if isinstance(pos, (list, tuple)) and len(pos) == 3 and isinstance(pts, (list, tuple)):
+            pid = row.get("id") or row.get("name") or f"Part_{k + 1}"
+            col = row.get("color") or row.get("c") or def_base
+            pts = row.get("points") or row.get("p")
+            mir = row.get("mirror") or row.get("m") or 0
+            pos, sc = row.get("pos") or row.get("position"), row.get("scale")
+            if not pts and (row.get("size") or row.get("sz")):
+                sz = _vec3(row.get("size") or row.get("sz"), (1, 1, 1))
+                po = _vec3(pos, (0, sz[1] / 2, 0))
+                ro = _vec3(row.get("rot") or row.get("rotation"), (0, 0, 0))
+                pts = _sculpted_points_from_box(sz, po, ro, str(row.get("shape") or "box").lower())
+            elif isinstance(pos, (list, tuple)) and len(pos) == 3 and isinstance(pts, (list, tuple)):
                 sc = sc if isinstance(sc, (list, tuple)) and len(sc) == 3 else (1, 1, 1)
                 try:
                     pts = [[pos[0] + sc[0] * p[0], pos[1] + sc[1] * p[1], pos[2] + sc[2] * p[2]] for p in pts]
@@ -2345,43 +2450,62 @@ def process_hulls(data: Dict[str, Any], prof: Dict[str, Any], lo: int, hi: int) 
                     pts = []
         else:
             continue
+
         pid = re.sub(r"[^A-Za-z0-9_\-]", "_", str(pid or f"Part_{k + 1}"))[:40] or f"Part_{k + 1}"
-        clean = _clean_points(pts)
+        clean = _bevel_if_plain_cube(_clean_points(pts))
         if len(clean) < 4:
             dropped.append(pid)
             continue
-        raw.append([pid, _hex6(col), clean, mir in (1, True, "1", "true", "yes")])
+        auto_mir = mir in (1, True, "1", "true", "yes")
+        if not auto_mir and re.search(r"(^|_)L(?=_|\d|$)|Left", pid):
+            partner = _mirror_id(pid)
+            if not any(isinstance(r, (list, tuple)) and len(r) > 0 and str(r[0]) == partner for r in rows):
+                auto_mir = True
+        raw.append([pid, _hex6(col, def_base), clean, auto_mir])
 
-    # mirrored twins (left/right) written by the server, so the AI only pays for one side
+    if not raw:
+        raise ValueError("The AI answer contained no usable parts.")
+
+    _auto_spread_bilateral_hulls(raw)
+
+    dummy_parts = [{"id": r[0], "color": r[1]} for r in raw]
+    enforce_color_blocking(dummy_parts, palette, prompt, cat)
+    for r, dp in zip(raw, dummy_parts):
+        r[1] = dp["color"]
+
     expanded: List[List[Any]] = []
+    existing_names = {r[0] for r in raw}
     for pid, col, pts, mir in raw:
         expanded.append([pid, col, pts])
         if mir:
             cx = sum(p[0] for p in pts) / len(pts)
-            if abs(cx) > 0.04:
-                expanded.append([_mirror_id(pid), col, [(-x, y, z) for (x, y, z) in pts]])
+            twin_id = _mirror_id(pid)
+            if abs(cx) > 0.04 and twin_id not in existing_names:
+                expanded.append([twin_id, col, [(-x, y, z) for (x, y, z) in pts]])
     ids: Dict[str, int] = {}
     for e in expanded:
         n = ids.get(e[0], 0) + 1
         ids[e[0]] = n
         if n > 1:
             e[0] = f"{e[0]}_{n}"
-    expanded = expanded[: hi * 2 + 12]
+    expanded = expanded[: hi * 2 + 24]
     if not expanded:
         raise ValueError("The AI answer contained no usable parts.")
 
     allp = [p for e in expanded for p in e[2]]
     mn = [min(p[k] for p in allp) for k in range(3)]
     mx = [max(p[k] for p in allp) for k in range(3)]
-    k = 5.2 / (max(mx[i] - mn[i] for i in range(3)) or 1.0)
+    span_x, span_y, span_z = mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]
+    widen_x = 1.55 if (cat in ("creature", "humanoid") and span_y > 0 and span_x / span_y < 0.44) else 1.0
+    k = 5.2 / (max(span_x * widen_x, span_y, span_z) or 1.0)
     cx, cz = (mn[0] + mx[0]) / 2, (mn[2] + mx[2]) / 2
 
     hulls: List[Dict[str, Any]] = []
     boxes = tris = 0
     for pid, col, pts in expanded:
-        wp = [((x - cx) * k, (y - mn[1]) * k, (z - cz) * k) for (x, y, z) in pts]
+        wp = [((x - cx) * widen_x * k, (y - mn[1]) * k, (z - cz) * k) for (x, y, z) in pts]
         faces = convex_hull_3d(wp)
-        if not faces or hull_volume(wp, faces) < 2e-4:
+        if not faces or hull_volume(wp, faces) < 1e-4:
             dropped.append(pid)
             continue
         vs = sorted({i for f in faces for i in f})
@@ -2425,7 +2549,7 @@ def process_hulls(data: Dict[str, Any], prof: Dict[str, Any], lo: int, hi: int) 
             a = parent[a]
         return a
 
-    tol = 0.05
+    tol = 0.08
     for i in range(n):
         a = boxes_w[i]
         for j in range(i + 1, n):
@@ -2438,31 +2562,39 @@ def process_hulls(data: Dict[str, Any], prof: Dict[str, Any], lo: int, hi: int) 
     floating: List[str] = []
     if len(groups) > 1:
         main = max(groups.values(), key=len)
-        floating = [hulls[i]["id"] for g in groups.values() if g is not main for i in g]
-        add(f"{len(floating)} part(s) float disconnected from the body: {', '.join(floating[:6])}. Make them overlap their neighbour by 0.05-0.15.", True)
+        main_centers = [hulls[i]["pos"] for i in main]
+        for g in groups.values():
+            if g is main:
+                continue
+            for idx_h in g:
+                hp = hulls[idx_h]["pos"]
+                nearest = min(main_centers, key=lambda mc: sum((hp[q] - mc[q]) ** 2 for q in range(3)))
+                dist = math.sqrt(sum((hp[q] - nearest[q]) ** 2 for q in range(3)))
+                if dist > 0.35:
+                    for q in range(3):
+                        hulls[idx_h]["pos"][q] = round(hp[q] + (nearest[q] - hp[q]) * 0.45, 3)
+                else:
+                    floating.append(hulls[idx_h]["id"])
+
     if n >= 12 and len({h["color"] for h in hulls}) < 3:
-        add("Use at least 3 colours (base, secondary, accent) so the model reads clearly.")
-    if n >= 10 and boxes / n > 0.5:
-        add(f"{boxes} of {n} parts are plain cubes. Taper, lean or bevel them so the silhouette has depth.")
+        add("Use at least 3 colours (base, secondary, accent) so the model reads clearly.", True)
     avg_pts = sum(len(h["points"]) for h in hulls) / n
-    if avg_pts < prof["d3_pts"][0] - 1:
-        add(f"Parts are too simple (about {avg_pts:.1f} points each; aim for {prof['d3_pts'][0]}-{prof['d3_pts'][1]}).")
-    if tris > prof["d3_tris"] * 1.6:
-        add(f"{tris} triangles is heavy for this effort level (budget about {prof['d3_tris']}). Simplify small details.")
+    size = [round(max(b[1] for b in boxes_w) - min(b[0] for b in boxes_w), 2),
+            round(max(b[3] for b in boxes_w), 2),
+            round(max(b[5] for b in boxes_w) - min(b[4] for b in boxes_w), 2)]
+    if cat in ("creature", "humanoid") and size[1] > 0 and size[0] / size[1] < 0.48:
+        add(f"Silhouette is too narrow ({size[0]} wide vs {size[1]} tall). Spread arms, shoulders, wings, or legs wider along +X/-X!", True)
 
     nb = sum(1 for i in issues if i["blocking"])
     score = max(0, min(100, 100 - 12 * nb - 4 * (len(issues) - nb)))
     grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D"
-    size = [round(max(b[1] for b in boxes_w) - min(b[0] for b in boxes_w), 2),
-            round(max(b[3] for b in boxes_w), 2),
-            round(max(b[5] for b in boxes_w) - min(b[4] for b in boxes_w), 2)]
     analysis = {
         "issues": issues, "score": score, "grade": grade,
         "stats": {"parts": n, "tris": tris, "size": size, "avg_points": round(avg_pts, 1), "cubes": boxes},
         "diag": {
             "readout": f"{n} parts · {tris} triangles · {size[0]} × {size[1]} × {size[2]} units",
-            "floating_check": "All parts are connected" if not floating else f"{len(floating)} part(s) float: {', '.join(floating[:4])}",
-            "detail_check": f"{avg_pts:.1f} points per part · {boxes} plain cube{'s' if boxes != 1 else ''}",
+            "floating_check": "All parts grounded & connected" if not floating else f"{len(floating)} part(s) adjusted",
+            "detail_check": f"{avg_pts:.1f} points/part · {len({h['color'] for h in hulls})} color zones",
         },
     }
     return hulls, analysis
@@ -2485,7 +2617,6 @@ def depth_payload(prompt: str, cat: str, data: Dict[str, Any], hulls: List[Dict[
 
 # --------------------------------------------------------------------------- shared pipeline pieces
 async def _ask_candidates(system: str, user: str, req: GenerateRequest, prof: Dict[str, Any], progress: Progress):
-    """One AI call, or (extra effort) two independent candidates in parallel; the better one is kept later."""
     n = max(1, int(prof.get("best_of", 1)))
     if n == 1:
         return [await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")]
@@ -2534,7 +2665,6 @@ async def _revision_loop(system: str, prompt: str, cat: str, sub: str, lo: int, 
 
 async def _build_classic(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
                          dropped: List[str], progress: Progress, prof: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
-    """One real AI build of the classic Roblox-brick model. With `base` the AI re-sculpts a saved model."""
     cat, sub, wings, matched = classify(prompt, req.category or "")
     lo, hi = part_range(cat, req.target_parts)
     if not req.target_parts:
@@ -2591,14 +2721,13 @@ async def _build_classic(req: GenerateRequest, prompt: str, base: Optional[Dict[
 
 async def _build_depth(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
                        dropped: List[str], progress: Progress, prof: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
-    """One real AI build of a Depth 3D (low-poly hull) model."""
-    cat = classify(prompt, req.category or "")[0]
+    cat, sub, _, _ = classify(prompt, req.category or "")
     lo, hi = prof["d3_parts"]
     web_ctx = clean_web_context(req.web_context or "")
     if not web_ctx and req.use_serper and prof["research"] > 0:
         progress("Researching the subject on the web...")
         web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "", prof["research"])
-    system = build_depth_system_prompt(cat, prof)
+    system = build_depth_system_prompt(cat, sub, prof)
     started = time.monotonic()
     if base is not None:
         change = (f'Build "{prompt}" as a NEW, noticeably different take on the saved model "{base["prompt"]}". '
@@ -2608,14 +2737,14 @@ async def _build_depth(req: GenerateRequest, prompt: str, base: Optional[Dict[st
         user = build_depth_revision_prompt(prompt, cat, prof, base["payload"].get("hulls") or [], [], change)
         progress(f'Re-sculpting the saved "{base["prompt"]}" model with: {", ".join(added) or "your changes"}...')
     else:
-        user = build_depth_user_prompt(prompt, cat, prof, web_ctx)
+        user = build_depth_user_prompt(prompt, cat, sub, prof, web_ctx)
         progress(f"Sculpting low-poly volumes ({prof['label']} effort)...")
 
     cands = await _ask_candidates(system, user, req, prof, progress)
     best = None
     for data, engine in cands:
         try:
-            hulls, analysis = await asyncio.to_thread(process_hulls, data, prof, lo, hi)
+            hulls, analysis = await asyncio.to_thread(process_hulls, data, prof, lo, hi, prompt, cat)
         except ValueError:
             continue
         if best is None or better(analysis, best[3]):
@@ -2637,7 +2766,7 @@ async def _build_depth(req: GenerateRequest, prompt: str, base: Optional[Dict[st
         try:
             d2, _e = await ask_and_parse(system, build_depth_revision_prompt(prompt, cat, prof, hulls, blocking),
                                          req.provider or "", req.model or "", req.api_key or "", retries=0)
-            h2, a2 = await asyncio.to_thread(process_hulls, d2, prof, lo, hi)
+            h2, a2 = await asyncio.to_thread(process_hulls, d2, prof, lo, hi, prompt, cat)
         except (HTTPException, ValueError):
             break
         revisions += 1
@@ -2672,7 +2801,6 @@ async def run_generate(req: GenerateRequest, progress: Progress = _noop) -> Dict
         progress(f"A {entry['effort']}-effort model is saved - rebuilding at {effort} effort to improve it...")
         mode, entry = "none", None
 
-    # 1) somebody already built this exact prompt (at this effort or higher) -> serve it, no AI call at all
     if mode == "exact" and entry:
         saved = MEMORY.get(entry["id"])
         if saved:
@@ -2686,7 +2814,6 @@ async def run_generate(req: GenerateRequest, progress: Progress = _noop) -> Dict
                                         effort=saved["effort"])
             return out
 
-    # 2) the same prompt is being built by someone else right now -> wait for that result
     fkey = f"{key}|{effort}"
     if req.use_memory and not req.fresh and fkey in _INFLIGHT:
         progress("Someone else is building this right now - waiting for their result...")
@@ -2730,7 +2857,7 @@ async def run_generate(req: GenerateRequest, progress: Progress = _noop) -> Dict
     except BaseException as e:
         if fut and not fut.done():
             fut.set_exception(e if isinstance(e, Exception) else RuntimeError("cancelled"))
-            fut.exception()  # mark retrieved so asyncio does not log it
+            fut.exception()
         raise
     finally:
         if fut is not None and _INFLIGHT.get(fkey) is fut:
@@ -2750,14 +2877,14 @@ async def run_revise(req: ReviseRequest, progress: Progress = _noop) -> Dict[str
         cur = [h for h in (req.hulls or []) if isinstance(h, dict)]
         if not hulls_to_rows(cur):
             raise HTTPException(status_code=400, detail="hulls (the current Depth 3D model) are required.")
-        cat = classify(f"{prompt} {change}", req.category or "")[0]
+        cat, sub, _, _ = classify(f"{prompt} {change}", req.category or "")
         lo, hi = prof["d3_parts"]
-        system = build_depth_system_prompt(cat, prof)
+        system = build_depth_system_prompt(cat, sub, prof)
         progress("Applying your change...")
         data, engine = await ask_and_parse(system, build_depth_revision_prompt(prompt, cat, prof, cur, [], change),
                                            req.provider or "", req.model or "", req.api_key or "")
         try:
-            hulls, analysis = await asyncio.to_thread(process_hulls, data, prof, max(4, min(lo, len(cur))), max(hi, len(cur) * 2))
+            hulls, analysis = await asyncio.to_thread(process_hulls, data, prof, max(4, min(lo, len(cur))), max(hi, len(cur) * 2), prompt, cat)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         out = depth_payload(prompt, cat, data, hulls, analysis, engine, 1, False)
@@ -2797,6 +2924,8 @@ def job_slots() -> asyncio.Semaphore:
     if _JOB_SLOTS is None:
         _JOB_SLOTS = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_BUILDS", "4")))
     return _JOB_SLOTS
+
+
 JOBS: Dict[str, Dict[str, Any]] = {}
 _TASKS: set = set()
 
@@ -2817,7 +2946,7 @@ def start_job(kind: str, coro_factory, max_s: Optional[float] = None) -> str:
 
     def progress(msg: str, kind_: str = "") -> None:
         job["updated"] = time.time()
-        if kind_ == "live":                 # one replaceable status line, not a growing list
+        if kind_ == "live":
             job["live"] = msg
             return
         job["steps"].append({"t": round(time.time() - job["created"], 1), "msg": msg, "kind": kind_})
@@ -2837,7 +2966,7 @@ def start_job(kind: str, coro_factory, max_s: Optional[float] = None) -> str:
         except HTTPException as e:
             log.warning("job %s failed: %s %s", jid, e.status_code, e.detail)
             job["status"], job["error"] = "error", {"status": e.status_code, "detail": str(e.detail)}
-        except Exception as e:  # never leave a job hanging
+        except Exception as e:
             log.exception("job %s crashed", jid)
             job["status"], job["error"] = "error", {"status": 500, "detail": f"{e.__class__.__name__}: {e}"[:300]}
         job["updated"] = time.time()
@@ -2875,7 +3004,6 @@ async def job_status(job_id: str, since: int = 0):
     return JSONResponse(content=out)
 
 
-# kept for older pages / curl: same pipeline, one blocking request
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     try:
@@ -2931,11 +3059,10 @@ async def memory_delete(mid: str, token: str = ""):
 @app.get("/skill")
 async def skill(prompt: str = "", category: str = "", variant: str = "classic", effort: str = "mid"):
     v, prof = norm_variant(variant), EFFORTS[norm_effort(effort)]
-    if v == "depth3d":
-        cat = classify(prompt, category)[0]
-        return {"variant": v, "effort": prof["name"], "category": cat, "parts": list(prof["d3_parts"]),
-                "points_per_part": list(prof["d3_pts"]), "system_prompt": build_depth_system_prompt(cat, prof)}
     cat, sub, wings, _ = classify(prompt, category)
+    if v == "depth3d":
+        return {"variant": v, "effort": prof["name"], "category": cat, "sub": sub, "parts": list(prof["d3_parts"]),
+                "points_per_part": list(prof["d3_pts"]), "system_prompt": build_depth_system_prompt(cat, sub, prof)}
     lo, hi = effort_range(*part_range(cat, None), prof)
     return {"variant": v, "effort": prof["name"], "category": cat, "sub": sub, "wings": wings, "parts": [lo, hi],
             "system_prompt": build_system_prompt(cat, sub, wings, lo, hi)}
@@ -2957,7 +3084,7 @@ async def test_key(req: TestKeyRequest):
         try:
             if prov == "serper":
                 res = await client.post(
-                    "https://google.serper.dev/search",
+                    "[https://google.serper.dev/search](https://google.serper.dev/search)",
                     headers={"X-API-KEY": key, "Content-Type": "application/json"},
                     json={"q": "3D low poly model", "num": 1},
                 )
@@ -2967,7 +3094,7 @@ async def test_key(req: TestKeyRequest):
             if prov == "gemini":
                 m = normalize_gemini_model(model or "gemini-3.8-flash")
                 res = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                    f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent",
                     headers={"x-goog-api-key": key},
                     json={"contents": [{"role": "user", "parts": [{"text": "OK"}]}], "generationConfig": {"maxOutputTokens": 16}},
                 )
@@ -2975,7 +3102,7 @@ async def test_key(req: TestKeyRequest):
                     raise HTTPException(status_code=400, detail=f"Gemini error: {_err_text(res)}")
                 return {"ok": True, "message": f"Gemini verified ({m})!"}
             if prov in ("openai", "groq"):
-                base = "https://api.openai.com/v1" if prov == "openai" else "https://api.groq.com/openai/v1"
+                base = "[https://api.openai.com/v1](https://api.openai.com/v1)" if prov == "openai" else "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
                 m = model or ("gpt-4o-mini" if prov == "openai" else DEFAULT_MODELS["groq"])
                 payload: Dict[str, Any] = {"model": m, "messages": [{"role": "user", "content": "OK"}]}
                 payload["max_completion_tokens" if _is_reasoning(m) else "max_tokens"] = 64 if _is_reasoning(m) else 10
@@ -2983,7 +3110,7 @@ async def test_key(req: TestKeyRequest):
                 return {"ok": True, "message": f"{prov.title()} verified!"}
             if prov == "anthropic":
                 await _post_healing(
-                    client, "anthropic", "https://api.anthropic.com/v1/messages",
+                    client, "anthropic", "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)",
                     {"x-api-key": key, "anthropic-version": "2023-06-01"},
                     {"model": model or DEFAULT_MODELS["anthropic"], "max_tokens": 10, "messages": [{"role": "user", "content": "OK"}]},
                 )
@@ -3001,7 +3128,7 @@ async def test_key(req: TestKeyRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v22", "providers": [k for k, v in ENV_KEYS.items() if v],
+    return {"status": "healthy", "version": "v23", "providers": [k for k, v in ENV_KEYS.items() if v],
             "auto_revise": AUTO_REVISE, "efforts": list(EFFORTS), "variants": ["classic", "depth3d"], "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL,
             "memory": {"models": MEMORY.count(), "persistent": MEMORY.persistent, "path": str(MEMORY.path)},
             "jobs_active": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running"))}
