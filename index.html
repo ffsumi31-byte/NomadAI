@@ -128,6 +128,27 @@ h2::before{content:"";width:5px;height:24px;border-radius:3px;background:var(--g
 .steps3 div::before{content:"";position:absolute;left:0;right:0;top:-2px;height:2px;background:var(--g);transform-origin:left;animation:draw .7s var(--ease) both}
 .steps3 div:nth-child(1)::before{animation-delay:.7s}.steps3 div:nth-child(2)::before{animation-delay:.1s}.steps3 div:nth-child(3)::before{animation-delay:1.3s}
 .steps3 b{color:var(--g)}
+.vseg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.vseg button{font:inherit;text-align:left;border:1px solid var(--ln);background:var(--card);color:var(--ink);padding:10px 12px;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:border-color .2s,background .2s}
+.vseg button b{font-size:14px}.vseg button span{font-size:12px;color:var(--mut)}
+.vseg button:hover{background:var(--soft)}
+.vseg button.on{border-color:var(--g);background:var(--tint);box-shadow:inset 0 0 0 1px var(--g)}
+.eff{margin:2px 0 10px}
+.eff-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;font-weight:700;color:var(--gh);margin-bottom:6px}
+.eff-h small{font-weight:500;color:var(--mut);font-size:12px}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--ln);border-radius:6px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;font-weight:700;padding:8px 4px;border:0;border-right:1px solid var(--ln);background:var(--card);color:var(--ink);cursor:pointer;transition:background .2s,color .2s;line-height:1.25}
+.seg button:last-child{border-right:0}.seg button:hover{background:var(--soft)}
+.seg button small{display:block;font-weight:500;font-size:11px;opacity:.8}
+.seg button.on{background:var(--g);color:#fff}
+.vseg button:focus-visible,.seg button:focus-visible{outline:2px solid var(--g);outline-offset:-2px}
+.eff-hint{font-size:12.5px;color:var(--mut);margin-top:6px;min-height:34px}
+.navnew{margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.05em;background:var(--tint);color:var(--gh);padding:2px 6px;border-radius:99px}
+#d3card{display:none}body[data-variant="d3"] #d3card{display:block}body[data-variant="d3"] #p-ai #rc{display:none}
+body[data-variant="d3"] .classic-only{display:none}
+#d3frame{width:100%;height:700px;border:1px solid var(--ln);border-radius:8px;background:#fff;display:block}
+.d3note{font-size:12.5px;color:var(--mut);margin:0 0 10px}
+.live{color:var(--gh);font-size:13px;margin:4px 0}
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:start}
 @media(max-width:900px){.two{grid-template-columns:1fr}}
 textarea{width:100%;min-height:92px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--ln);border-radius:5px;padding:11px 12px;outline:0;transition:border-color .2s}
@@ -376,7 +397,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
  <div class="bg-coords" id="coords">x 0 · y 0</div>
 </div>
 <aside class="side"><div class="logo" data-go="overview"><i data-i="parts"></i>Verdant 3D</div>
-<div class="nav"><i class="nav-ind n"></i><button data-go="overview" class="on"><span data-i="home"></span>Overview</button><button data-go="ai"><span data-i="ai"></span>AI Builder</button><button data-go="parts"><span data-i="parts"></span>Parts</button><button data-go="library"><span data-i="library"></span>Library</button><button data-go="pricing"><span data-i="pricing"></span>Pricing</button></div>
+<div class="nav"><i class="nav-ind n"></i><button data-go="overview" class="on"><span data-i="home"></span>Overview</button><button data-go="ai" data-variant="classic"><span data-i="ai"></span>AI Builder</button><button data-go="ai" data-variant="d3"><span data-i="parts"></span>Depth 3D<span class="navnew">NEW</span></button><button data-go="parts"><span data-i="parts"></span>Parts</button><button data-go="library"><span data-i="library"></span>Library</button><button data-go="pricing"><span data-i="pricing"></span>Pricing</button></div>
 <div class="sfoot">Current model<br><b id="cnt">0 parts</b><div class="meter" title="Model size (the AI builds up to about 240 parts)"><i id="meter"></i></div><button class="btn pri sm" data-go="pricing" style="margin-top:10px;width:100%">Upgrade</button></div></aside>
 
 <main>
@@ -431,8 +452,19 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
   </div></div>
  </div>
 </section>
-<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div><textarea id="prompt" placeholder="For example: a giant gorilla with big muscular hands, a giant purple kraken squid, a fierce red fire dragon, or a sleek sports car"></textarea>
+<div class="two"><div class="card"><div class="ph"><span class="phi" data-i="ai"></span>Describe your model<span class="sp"></span><button class="epill" id="epill" type="button" title="Open the AI engine"></button></div>
+<div class="vseg" id="vseg" role="group" aria-label="Builder variant">
+ <button type="button" data-var="classic" class="on"><b>Classic</b><span>Roblox brick sculpting</span></button>
+ <button type="button" data-var="d3"><b>Depth 3D</b><span>Low-poly volumes · pro workspace</span></button>
+</div><textarea id="prompt" placeholder="For example: a giant gorilla with big muscular hands, a giant purple kraken squid, a fierce red fire dragon, or a sleek sports car"></textarea>
 <div class="chips" id="chips"></div>
+<div class="eff" id="eff"><div class="eff-h"><span>AI effort</span><small id="eff-name">Mid</small></div>
+ <div class="seg" id="eff-seg" role="radiogroup" aria-label="AI effort">
+  <button type="button" role="radio" data-eff="low" title="Fastest"><b>Low</b><small>Fastest</small></button>
+  <button type="button" role="radio" data-eff="mid" class="on" title="Balanced"><b>Mid</b><small>Balance</small></button>
+  <button type="button" role="radio" data-eff="high" title="AI deep work, recommended for pro modelers"><b>High</b><small>Deep work · pro</small></button>
+  <button type="button" role="radio" data-eff="extra" title="Everything in High, but even stronger"><b>Extra</b><small>Maximum</small></button>
+ </div><div class="eff-hint" id="eff-hint"></div></div>
 <div class="row" style="margin-bottom:8px">
  <select class="sel-cat" id="cat-sel" title="Blueprint category">
   <option value="">Category: Auto-detect</option>
@@ -447,13 +479,15 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
  <label class="ck"><input type="checkbox" id="tonal-var" checked>Tonal variation</label>
  <label class="ck" title="Your finished model is saved so other people who type the same prompt get it instantly, with no AI cost."><input type="checkbox" id="publish-mem" checked>Share to global memory</label>
 </div>
-<div class="row"><label class="ck"><input type="checkbox" id="keep">Add to current model</label><label class="ck"><input type="checkbox" id="use-serper" checked>Use Serper web search</label><span class="sp"></span><button class="btn pri" id="build">Build with AI</button></div>
+<div class="row"><label class="ck classic-only"><input type="checkbox" id="keep">Add to current model</label><label class="ck"><input type="checkbox" id="use-serper" checked>Use Serper web search</label><span class="sp"></span><button class="btn pri" id="build">Build with AI</button></div>
 <div class="rev-box" id="rev-box">
  <input id="rev-inp" type="text" placeholder="Revise current model (e.g. add glowing gold armor or make wings wider)…">
  <button class="btn sm pri" id="rev-btn" type="button">Revise</button>
 </div>
 <div class="prog" id="prog"><i></i></div>
-<div id="steps"></div></div><div id="slot-ai"></div></div></section>
+<div id="steps"></div></div><div id="slot-ai"><div class="card" id="d3card"><div class="ph"><span class="phi" data-i="parts"></span>Depth 3D workspace<span class="sp"></span><small id="d3-stat" style="font-weight:500;color:var(--mut)">No model yet</small></div>
+<p class="d3note">Drag points, scale parts, recolour and rename. “Revise” sends your edits to the AI. Export OBJ or JSON from the toolbar.</p>
+<iframe id="d3frame" title="Depth 3D low-poly workspace" sandbox="allow-scripts"></iframe></div></div></div></section>
 
 <section class="page" id="p-parts"><h2>Parts</h2><p class="sub">Add shapes, then select a part to change it. Everything updates in the result instantly.</p>
 <div class="two"><div class="side2"><div class="card"><div class="ph"><span class="phi" data-i="parts"></span>Add a part</div><div class="shapes" id="shapes"></div>
@@ -479,6 +513,7 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script type="application/json" id="lp-src">"\u003c!doctype html>\u003chtml>\u003chead>\u003cmeta charset=utf8>\u003cmeta name=viewport content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\u003cstyle>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}\u003c/style>\u003c/head>\u003cbody>\n\u003cmeta name=\"claude:viewport-fit-sides\" content=\"cover\">\n\u003ctitle>Depth 3D workspace\u003c/title>\n\u003cstyle>\n/* Layout: 3D stage with a helper panel beside it on wide screens and below it on phones. */\n:root {\n  --bg: #eef0ec; --panel: #ffffff; --fg: #1c231f; --muted: #66716b; --line: #d6dbd5;\n  --accent: #2f7d55; --accent-fg: #ffffff; --hot: #e0a030;\n  color-scheme: light;\n}\n@media (prefers-color-scheme: dark) {\n  :root:not([data-theme=\"light\"]) {\n    --bg: #101412; --panel: #181e1b; --fg: #e4eae6; --muted: #93a09a; --line: #2a332e;\n    --accent: #5cc28c; --accent-fg: #0b130f; --hot: #e8b860; color-scheme: dark;\n  }\n}\n:root[data-theme=\"dark\"] {\n  --bg: #101412; --panel: #181e1b; --fg: #e4eae6; --muted: #93a09a; --line: #2a332e;\n  --accent: #5cc28c; --accent-fg: #0b130f; --hot: #e8b860; color-scheme: dark;\n}\n* { box-sizing: border-box; }\nhtml, body { height: 100%; margin: 0; }\nbody {\n  background: var(--bg); color: var(--fg);\n  font-family: \"Inter\", system-ui, -apple-system, \"Segoe UI\", sans-serif; font-size: 14px;\n  padding-left: max(16px, env(safe-area-inset-left, 0px));\n  padding-right: max(16px, env(safe-area-inset-right, 0px));\n  padding-top: 12px; padding-bottom: 12px;\n  display: flex; flex-direction: column; gap: 12px; overflow-x: hidden;\n}\nheader { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }\nh1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }\n.tools { display: flex; gap: 6px; flex-wrap: wrap; }\n.btn {\n  appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--fg);\n  border-radius: 8px; padding: 9px 12px; font: inherit; cursor: pointer; white-space: nowrap; min-height: 40px;\n}\n.btn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }\n.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n.btn.small { min-height: 34px; padding: 6px 10px; }\nmain { display: grid; grid-template-columns: 1fr; gap: 12px; flex: 1; min-height: 0; min-width: 0; }\n@media (min-width: 860px) { main { grid-template-columns: 1fr 300px; } }\n#stage {\n  position: relative; min-height: 420px; border: 1px solid var(--line); border-radius: 12px;\n  background: var(--panel); overflow: hidden; min-width: 0; touch-action: none;\n}\n#stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }\n#stage canvas.grabbing { cursor: grabbing; }\n#mode {\n  position: absolute; left: 10px; top: 10px; font-size: 13px; color: var(--fg);\n  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;\n  font-variant-numeric: tabular-nums; max-width: calc(100% - 20px); pointer-events: none;\n}\n#addHere {\n  position: absolute; right: 10px; bottom: 10px; font-size: 15px; font-weight: 600;\n}\naside {\n  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 14px;\n  display: flex; flex-direction: column; gap: 14px; min-width: 0;\n}\naside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }\n.section { display: flex; flex-direction: column; gap: 8px; }\n.section[hidden] { display: none !important; }\n.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }\n.axis { display: grid; grid-template-columns: 22px 1fr 68px; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }\n.axis b { color: var(--muted); font-weight: 600; }\n.axis input[type=\"range\"] { width: 100%; accent-color: var(--accent); }\n.axis input[type=\"number\"] {\n  width: 100%; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line);\n  border-radius: 6px; padding: 4px 6px;\n}\n.note { color: var(--muted); font-size: 12px; margin: 0; }\n#count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }\ntextarea {\n  width: 100%; min-height: 140px; font: 12px ui-monospace, Menlo, monospace; color: var(--fg);\n  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical;\n}\nbody.embed { padding-top: 8px; padding-bottom: 8px; gap: 8px; }\nbody.embed #stage { min-height: 380px; }\nbody.embed header h1 { font-size: 15px; }\n.axis input[type=text] { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; }\nkbd { font: 600 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--bg); color: var(--fg); }\n\u003c/style>\n\n\u003cheader>\n  \u003ch1>Depth 3D \u003csmall style=\"font-weight:500;color:var(--muted)\">low-poly workspace\u003c/small>\u003c/h1>\n  \u003cdiv class=\"tools\" role=\"toolbar\" aria-label=\"Tools\">\n    \u003cbutton class=\"btn\" id=\"bCube\" type=\"button\">+ Cube \u003ckbd>C\u003c/kbd>\u003c/button>\n    \u003cbutton class=\"btn\" id=\"bPoint\" type=\"button\">+ Point \u003ckbd>P\u003c/kbd>\u003c/button>\n    \u003cbutton class=\"btn\" id=\"bDel\" type=\"button\">Delete \u003ckbd>Del\u003c/kbd>\u003c/button>\n    \u003cbutton class=\"btn\" id=\"bExport\" type=\"button\">Export OBJ\u003c/button>\n    \u003cbutton class=\"btn\" id=\"bJson\" type=\"button\">Export JSON\u003c/button>\n    \u003cbutton class=\"btn\" id=\"bLoad\" type=\"button\">Load JSON\u003c/button>\n  \u003c/div>\n\u003c/header>\n\n\u003cmain>\n  \u003cdiv id=\"stage\">\n    \u003cdiv id=\"mode\">Drag to orbit. Click a part to select it. Drag a selected part to move it.\u003c/div>\n    \u003cbutton class=\"btn\" id=\"addHere\" type=\"button\" hidden>+ Point here\u003c/button>\n  \u003c/div>\n\n  \u003caside aria-label=\"Editing helpers\">\n    \u003cdiv class=\"section\" id=\"partSec\" hidden>\n      \u003ch2>Part\u003c/h2>\n      \u003cdiv class=\"axis\">\u003cb>Aa\u003c/b>\u003cinput type=\"text\" id=\"pname\" maxlength=\"40\" aria-label=\"Part name\" style=\"grid-column:2 / -1\">\u003c/div>\n      \u003cdiv class=\"axis\">\u003cb>\u25d0\u003c/b>\u003cinput type=\"color\" id=\"pcol\" aria-label=\"Part color\" style=\"grid-column:2 / -1;width:100%;height:34px;padding:2px\">\u003c/div>\n      \u003cdiv class=\"axis\">\u003cb>X\u003c/b>\u003cinput type=\"range\" id=\"sx\" min=\"0.2\" max=\"4\" step=\"0.05\" value=\"1\">\u003cinput type=\"number\" id=\"sxN\" step=\"0.05\" min=\"0.1\">\u003c/div>\n      \u003cdiv class=\"axis\">\u003cb>Y\u003c/b>\u003cinput type=\"range\" id=\"sy\" min=\"0.2\" max=\"4\" step=\"0.05\" value=\"1\">\u003cinput type=\"number\" id=\"syN\" step=\"0.05\" min=\"0.1\">\u003c/div>\n      \u003cdiv class=\"axis\">\u003cb>Z\u003c/b>\u003cinput type=\"range\" id=\"sz\" min=\"0.2\" max=\"4\" step=\"0.05\" value=\"1\">\u003cinput type=\"number\" id=\"szN\" step=\"0.05\" min=\"0.1\">\u003c/div>\n      \u003cdiv class=\"row\">\n        \u003cbutton class=\"btn small\" id=\"uniform\" type=\"button\">Lock all axes: off\u003c/button>\n        \u003cbutton class=\"btn small\" id=\"resetScale\" type=\"button\">Reset size\u003c/button>\n      \u003c/div>\n      \u003cp class=\"note\">Drag the selected part on the ground to move it. Hold Shift and drag to raise or lower it.\u003c/p>\n    \u003c/div>\n\n    \u003cdiv class=\"section\" id=\"ptSec\" hidden>\n      \u003ch2>Selected point\u003c/h2>\n      \u003cp class=\"note\" id=\"ptInfo\">\u003c/p>\n      \u003cdiv class=\"axis\">\u003cb>X\u003c/b>\u003cinput type=\"range\" id=\"px\" min=\"-4\" max=\"4\" step=\"0.05\" value=\"0\">\u003cinput type=\"number\" id=\"pxN\" step=\"0.05\">\u003c/div>\n      \u003cdiv class=\"axis\">\u003cb>Y\u003c/b>\u003cinput type=\"range\" id=\"py\" min=\"-4\" max=\"4\" step=\"0.05\" value=\"0\">\u003cinput type=\"number\" id=\"pyN\" step=\"0.05\">\u003c/div>\n      \u003cdiv class=\"axis\">\u003cb>Z\u003c/b>\u003cinput type=\"range\" id=\"pz\" min=\"-4\" max=\"4\" step=\"0.05\" value=\"0\">\u003cinput type=\"number\" id=\"pzN\" step=\"0.05\">\u003c/div>\n      \u003cdiv class=\"row\">\u003cbutton class=\"btn small\" id=\"ptRemove\" type=\"button\">Remove point\u003c/button>\u003c/div>\n    \u003c/div>\n\n    \u003cdiv class=\"section\">\n      \u003ch2>Model\u003c/h2>\n      \u003cdiv id=\"count\">0 parts \u00b7 0 tris\u003c/div>\n      \u003cp class=\"note\">Each part is the convex hull of its points, so it stays low poly and flat shaded. Drag empty space to orbit, right-drag to pan, scroll to zoom.\u003c/p>\n    \u003c/div>\n\n    \u003cdiv class=\"section\" id=\"outSec\" hidden>\n      \u003ch2>Export / import text\u003c/h2>\n      \u003ctextarea id=\"out\" aria-label=\"Export or import text\">\u003c/textarea>\n      \u003cdiv class=\"row\">\u003cbutton class=\"btn small\" id=\"bApply\" type=\"button\">Load this JSON\u003c/button>\u003c/div>\n      \u003cp class=\"note\">Copy this text to save it as a .obj or .json file. To import, paste a Depth 3D JSON here and press Load.\u003c/p>\n    \u003c/div>\n  \u003c/aside>\n\u003c/main>\n\n\u003cscript src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js\">\u003c/script>\n\u003cscript src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js\">\u003c/script>\n\u003cscript src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/ConvexHull.js\">\u003c/script>\n\u003cscript src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/ConvexGeometry.js\">\u003c/script>\n\u003cscript>\n(function () {\n  const $ = id => document.getElementById(id);\n  const stage = $('stage');\n  const modeEl = $('mode');\n\n  const renderer = new THREE.WebGLRenderer({ antialias: true });\n  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));\n  const canvas = renderer.domElement;\n  stage.insertBefore(canvas, modeEl);\n  const scene = new THREE.Scene();\n  scene.background = new THREE.Color(0xdfe6df);\n  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);\n  camera.position.set(6, 6, 8);\n  const controls = new THREE.OrbitControls(camera, canvas);\n  controls.enableDamping = true;\n  controls.target.set(0, 1, 0);\n  scene.add(new THREE.HemisphereLight(0xffffff, 0x556055, 0.95));\n  const sun = new THREE.DirectionalLight(0xffffff, 0.8);\n  sun.position.set(5, 10, 6);\n  scene.add(sun);\n  const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0xc9d3c8, roughness: 1 }));\n  ground.rotation.x = -Math.PI / 2;\n  scene.add(ground);\n  scene.add(new THREE.GridHelper(60, 60, 0x9aa89c, 0xb7c2b6));\n\n  const parts = [];      // { group, points: [Vector3 local], mesh, pointMeshes: [] }\n  let selected = null;\n  let selPoint = -1;\n  const mouse = new THREE.Vector2();\n  const ray = new THREE.Raycaster();\n  const UP = new THREE.Vector3(0, 1, 0);\n  const groundPlane = new THREE.Plane(UP, 0);\n\n  // Drag state. A press that moves less than 5px is a click; anything more is a drag.\n  let press = null;      // { x, y, moved, kind: 'part'|'point'|null, offset, plane, startY }\n\n  const ghost = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshBasicMaterial({ color: 0x2f7d55, transparent: true, opacity: 0.8, depthTest: false }));\n  ghost.visible = false; ghost.renderOrder = 10;\n  scene.add(ghost);\n\n  function resize() {\n    const w = stage.clientWidth, h = stage.clientHeight;\n    renderer.setSize(w, h, false);\n    canvas.style.width = w + 'px';\n    canvas.style.height = h + 'px';\n    camera.aspect = w / h; camera.updateProjectionMatrix();\n  }\n  new ResizeObserver(resize).observe(stage);\n  resize();\n  (function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();\n\n  const DEFAULT_COLOR = '#5f9a78';\n  const matCache = new Map();\n  function partMat(color, sel) {\n    const k = color + (sel ? '*' : '');\n    if (!matCache.has(k)) {\n      const c = new THREE.Color(color);\n      matCache.set(k, sel\n        ? new THREE.MeshStandardMaterial({ color: c.clone().lerp(new THREE.Color(0xffffff), 0.3), flatShading: true, roughness: 0.9, emissive: c.clone().multiplyScalar(0.2) })\n        : new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 0.9 }));\n    }\n    return matCache.get(k);\n  }\n  const dotMat = new THREE.MeshBasicMaterial({ color: 0xe0a030, depthTest: false });\n  const dotSelMat = new THREE.MeshBasicMaterial({ color: 0xff5a2a, depthTest: false });\n  const dotGeo = new THREE.SphereGeometry(0.1, 8, 6);\n\n  function rebuild(p) {\n    if (p.mesh) { p.group.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh = null; }\n    p.pointMeshes.forEach(m => p.group.remove(m));\n    p.pointMeshes = [];\n    if (p.points.length >= 4) {\n      try {\n        const geo = new THREE.ConvexGeometry(p.points);\n        p.mesh = new THREE.Mesh(geo, partMat(p.color || DEFAULT_COLOR, p === selected));\n        p.mesh.userData.part = p;\n        p.group.add(p.mesh);\n      } catch (e) { p.mesh = null; }\n    }\n    if (p === selected) {\n      p.pointMeshes = p.points.map((v, i) => {\n        const m = new THREE.Mesh(dotGeo, i === selPoint ? dotSelMat : dotMat);\n        m.position.copy(v); m.renderOrder = 5;\n        m.userData.point = { part: p, index: i };\n        p.group.add(m);\n        return m;\n      });\n    }\n    updateCount();\n  }\n\n  function updateCount() {\n    markDirty();\n    let tris = 0;\n    parts.forEach(p => { if (p.mesh) tris += p.mesh.geometry.attributes.position.count / 3; });\n    $('count').textContent = parts.length + ' parts \u00b7 ' + Math.round(tris) + ' tris';\n  }\n\n  // ---- model \u003c-> JSON, and the bridge to the Verdant page ----\n  const inFrame = window.parent !== window;\n  if (inFrame) { document.documentElement.dataset.theme = 'light'; document.body.classList.add('embed'); }\n  function post(msg) { if (inFrame) window.parent.postMessage(Object.assign({ source: 'verdant-lowpoly' }, msg), '*'); }\n  let dirtyT = 0;\n  function markDirty() { clearTimeout(dirtyT); dirtyT = setTimeout(() => { let t = 0; parts.forEach(p => { if (p.mesh) t += p.mesh.geometry.attributes.position.count / 3; }); post({ type: 'lp:changed', parts: parts.length, tris: Math.round(t), model: serialize() }); }, 350); }\n  const r3 = n => Math.round(n * 1000) / 1000;\n  function serialize() {\n    return {\n      format: 'verdant-lowpoly', version: 1, title: modelTitle,\n      parts: parts.map((p, i) => ({\n        id: p.name || ('part_' + (i + 1)), color: p.color || DEFAULT_COLOR,\n        pos: [r3(p.group.position.x), r3(p.group.position.y), r3(p.group.position.z)],\n        scale: [r3(p.group.scale.x), r3(p.group.scale.y), r3(p.group.scale.z)],\n        points: p.points.map(v => [r3(v.x), r3(v.y), r3(v.z)])\n      }))\n    };\n  }\n  let modelTitle = 'Untitled';\n  function clearModel() {\n    parts.forEach(p => { scene.remove(p.group); if (p.mesh) p.mesh.geometry.dispose(); });\n    parts.length = 0; selected = null; selPoint = -1;\n  }\n  function frameModel() {\n    const box = new THREE.Box3(); const v = new THREE.Vector3();\n    parts.forEach(p => { p.group.updateMatrixWorld(true); p.points.forEach(pt => box.expandByPoint(v.copy(pt).applyMatrix4(p.group.matrixWorld))); });\n    if (box.isEmpty()) return;\n    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());\n    const d = Math.max(size.x, size.y, size.z, 1) * 1.9 + 2;\n    controls.target.copy(c);\n    camera.position.set(c.x + d * 0.62, c.y + d * 0.42, c.z + d * 0.78);\n    controls.update();\n  }\n  function loadModel(m, keepView) {\n    if (!m || !Array.isArray(m.parts)) throw new Error('This is not a Depth 3D model.');\n    clearModel();\n    modelTitle = String(m.title || 'Untitled').slice(0, 80);\n    m.parts.forEach((d, i) => {\n      const pts = (d.points || []).filter(a => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite)).map(a => new THREE.Vector3(a[0], a[1], a[2]));\n      if (pts.length \u003c 4) return;\n      const g = new THREE.Group(); scene.add(g);\n      const pos = d.pos || [0, 0, 0], sc = d.scale || [1, 1, 1];\n      g.position.set(+pos[0] || 0, +pos[1] || 0, +pos[2] || 0);\n      g.scale.set(+sc[0] || 1, +sc[1] || 1, +sc[2] || 1);\n      const color = /^#[0-9a-f]{6}$/i.test(d.color || '') ? d.color : DEFAULT_COLOR;\n      const p = { group: g, points: pts, mesh: null, pointMeshes: [], color, name: String(d.id || ('part_' + (i + 1))).slice(0, 40) };\n      parts.push(p); rebuild(p);\n    });\n    select(null); updateCount();\n    if (!keepView) frameModel();\n    modeEl.textContent = modelTitle + ' loaded (' + parts.length + ' parts). Click a part to select it.';\n  }\n  window.addEventListener('message', e => {\n    if (e.source !== window.parent) return;\n    const d = e.data || {};\n    try {\n      if (d.type === 'lp:load') loadModel(d.model, d.keepView);\n      else if (d.type === 'lp:get') post({ type: 'lp:model', id: d.id, model: serialize() });\n      else if (d.type === 'lp:clear') { clearModel(); select(null); updateCount(); }\n    } catch (err) { post({ type: 'lp:error', message: String(err.message || err) }); }\n  });\n\n  function select(p) {\n    const prev = selected;\n    selected = p || null;\n    selPoint = -1;\n    if (prev) rebuild(prev);\n    if (selected) rebuild(selected);\n    syncPanels();\n    modeEl.classList.remove('on');\n    modeEl.textContent = selected\n      ? 'Selected part (' + selected.points.length + ' points). Drag it to move, or click an orange dot to edit a point.'\n      : 'Drag to orbit. Click a part to select it.';\n  }\n\n  function addCube(at) {\n    const g = new THREE.Group();\n    scene.add(g);\n    const h = 0.5;\n    const pts = [];\n    for (const x of [-h, h]) for (const y of [-h, h]) for (const z of [-h, h]) pts.push(new THREE.Vector3(x, y, z));\n    g.position.set(at ? at.x : 0, h, at ? at.z : 0);\n    const p = { group: g, points: pts, mesh: null, pointMeshes: [], color: DEFAULT_COLOR, name: 'part_' + (parts.length + 1) };\n    parts.push(p);\n    select(p);\n    rebuild(p);\n  }\n\n  function setMouse(e) {\n    const r = canvas.getBoundingClientRect();\n    mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;\n    mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;\n    ray.setFromCamera(mouse, camera);\n  }\n\n  function groundHit() {\n    const t = new THREE.Vector3();\n    return ray.ray.intersectPlane(groundPlane, t) ? t : null;\n  }\n\n  function surfaceHit() {\n    const meshes = parts.filter(p => p.mesh).map(p => p.mesh);\n    const hits = ray.intersectObjects(meshes, false);\n    if (hits.length) {\n      const h = hits[0];\n      return { point: h.point.clone(), normal: h.face.normal.clone().transformDirection(h.object.matrixWorld) };\n    }\n    const g = groundHit();\n    return g ? { point: g, normal: UP.clone() } : null;\n  }\n\n  function targetFor(h) { return h.point.clone().add(h.normal.clone().multiplyScalar(0.15)); }\n\n  function addPointAtGhost() {\n    if (!selected) { modeEl.textContent = 'Select a part first.'; return; }\n    const h = surfaceHit();\n    if (!h) return;\n    selected.points.push(selected.group.worldToLocal(targetFor(h)));\n    selPoint = selected.points.length - 1;\n    rebuild(selected);\n    syncPanels();\n    modeEl.textContent = 'Point added. Drag it or use the sliders.';\n  }\n\n  function removePoint(p, i) {\n    if (!p || i \u003c 0) return;\n    if (p.points.length \u003c= 4) { modeEl.textContent = 'A part needs at least 4 points.'; return; }\n    p.points.splice(i, 1);\n    selPoint = -1;\n    rebuild(p);\n    syncPanels();\n  }\n\n  function deleteSelected() {\n    if (!selected) return;\n    scene.remove(selected.group);\n    parts.splice(parts.indexOf(selected), 1);\n    selected = null; selPoint = -1;\n    syncPanels(); updateCount();\n    modeEl.textContent = 'Deleted.';\n  }\n\n  // ---- panels ----\n  function bindPair(rangeId, numId, set, min, max) {\n    const r = $(rangeId), n = $(numId);\n    const apply = v => {\n      v = parseFloat(v);\n      if (isNaN(v)) return;\n      set(Math.max(min, Math.min(max, v)));\n    };\n    r.addEventListener('input', () => apply(r.value));\n    n.addEventListener('change', () => apply(n.value));\n  }\n  let locked = false;\n  $('uniform').onclick = () => {\n    locked = !locked;\n    $('uniform').textContent = 'Lock all axes: ' + (locked ? 'on' : 'off');\n    $('uniform').classList.toggle('on', locked);\n  };\n  function setScale(axis, v) {\n    if (!selected) return;\n    const s = selected.group.scale;\n    if (locked) s.set(v, v, v); else s[axis] = v;\n    syncScale(); markDirty();\n  }\n  function syncScale() {\n    if (!selected) return;\n    const s = selected.group.scale;\n    [['sx', 'sxN', s.x], ['sy', 'syN', s.y], ['sz', 'szN', s.z]].forEach(([r, n, v]) => {\n      $(r).value = Math.max(0.2, Math.min(4, v)); $(n).value = v.toFixed(2);\n    });\n  }\n  bindPair('sx', 'sxN', v => setScale('x', v), 0.2, 4);\n  bindPair('sy', 'syN', v => setScale('y', v), 0.2, 4);\n  bindPair('sz', 'szN', v => setScale('z', v), 0.2, 4);\n  $('resetScale').onclick = () => { if (selected) { selected.group.scale.set(1, 1, 1); syncScale(); markDirty(); } };\n\n  function setPt(axis, v) {\n    if (!selected || selPoint \u003c 0) return;\n    selected.points[selPoint][axis] = v;\n    rebuild(selected);\n    syncPoint();\n  }\n  function syncPoint() {\n    const has = selected && selPoint >= 0;\n    if (!has) return;\n    $('ptInfo').textContent = 'Point ' + (selPoint + 1) + ' of ' + selected.points.length + '. Drag its dot in the scene, or type a value.';\n    const v = selected.points[selPoint];\n    [['px', 'pxN', 'x'], ['py', 'pyN', 'y'], ['pz', 'pzN', 'z']].forEach(([r, n, a]) => {\n      $(r).value = Math.max(-4, Math.min(4, v[a])); $(n).value = v[a].toFixed(2);\n    });\n  }\n  bindPair('px', 'pxN', v => setPt('x', v), -4, 4);\n  bindPair('py', 'pyN', v => setPt('y', v), -4, 4);\n  bindPair('pz', 'pzN', v => setPt('z', v), -4, 4);\n  $('ptRemove').onclick = () => removePoint(selected, selPoint);\n  $('pcol').addEventListener('input', () => { if (selected) { selected.color = $('pcol').value; rebuild(selected); } });\n  $('pname').addEventListener('change', () => { if (selected) { selected.name = $('pname').value.trim().slice(0, 40) || selected.name; markDirty(); } });\n\n  function syncPanels() {\n    $('partSec').hidden = !selected;\n    $('ptSec').hidden = !(selected && selPoint >= 0);\n    $('addHere').hidden = !selected;\n    if (selected) { syncScale(); $('pname').value = selected.name || ''; $('pcol').value = selected.color || DEFAULT_COLOR; }\n    syncPoint();\n  }\n\n  // ---- pointer: orbit by default, drag the selected part or point, click to select ----\n  canvas.addEventListener('pointerdown', e => {\n    if (e.button !== 0) return;\n    setMouse(e);\n    press = { x: e.clientX, y: e.clientY, moved: false, kind: null };\n    if (selected) {\n      // a dot on the selected part: drag the point\n      const dh = ray.intersectObjects(selected.pointMeshes, false);\n      if (dh.length) {\n        selPoint = dh[0].object.userData.point.index;\n        press.kind = 'point';\n        press.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(\n          camera.getWorldDirection(new THREE.Vector3()).negate(),\n          selected.group.localToWorld(selected.points[selPoint].clone()));\n        rebuild(selected);\n        syncPanels();\n        controls.enabled = false;\n        return;\n      }\n      // the selected part itself: drag to move on the ground\n      const mh = selected.mesh ? ray.intersectObject(selected.mesh, false) : [];\n      if (mh.length) {\n        press.kind = 'part';\n        const g = groundHit();\n        press.offset = g ? g.clone().sub(new THREE.Vector3(selected.group.position.x, 0, selected.group.position.z)) : new THREE.Vector3();\n        press.startY = selected.group.position.y;\n        controls.enabled = false;\n        canvas.classList.add('grabbing');\n      }\n    }\n  });\n\n  canvas.addEventListener('pointermove', e => {\n    setMouse(e);\n    if (press && !press.moved && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) press.moved = true;\n\n    if (press && press.moved && press.kind === 'part' && selected) {\n      if (e.shiftKey) {\n        selected.group.position.y = Math.max(0, press.startY - (e.clientY - press.y) * 0.02);\n      } else {\n        const g = groundHit();\n        if (g) {\n          selected.group.position.x = g.x - press.offset.x;\n          selected.group.position.z = g.z - press.offset.z;\n        }\n      }\n      return;\n    }\n    if (press && press.moved && press.kind === 'point' && selected) {\n      const t = new THREE.Vector3();\n      if (ray.ray.intersectPlane(press.plane, t)) {\n        selected.points[selPoint].copy(selected.group.worldToLocal(t));\n        rebuild(selected);\n        syncPoint();\n      }\n      return;\n    }\n\n    // hover: ghost marker for where a new point will land\n    if (!press && selected) {\n      const h = surfaceHit();\n      if (h) { ghost.visible = true; ghost.position.copy(targetFor(h)); } else ghost.visible = false;\n    }\n  });\n\n  function endPress() {\n    if (!press) return;\n    const wasClick = !press.moved;\n    controls.enabled = true;\n    canvas.classList.remove('grabbing');\n    if (wasClick && press.kind === null) {\n      // click on empty space or a different part: select or deselect\n      const meshes = parts.filter(p => p.mesh).map(p => p.mesh);\n      const hs = ray.intersectObjects(meshes, false);\n      if (hs.length) select(hs[0].object.userData.part);\n      else select(null);\n    } else if (wasClick && press.kind === 'point') {\n      modeEl.textContent = 'Point ' + (selPoint + 1) + ' selected.';\n    } else if (press.kind === 'part' && press.moved) {\n      modeEl.textContent = 'Moved. Hold Shift and drag to raise or lower it.';\n    }\n    if (wasPartMove(press)) markDirty();\n    press = null;\n  }\n  function wasPartMove(pr) { return pr && pr.kind === 'part' && pr.moved; }\n  canvas.addEventListener('pointerup', endPress);\n  canvas.addEventListener('pointercancel', endPress);\n  canvas.addEventListener('pointerleave', () => { ghost.visible = false; });\n\n  // ---- buttons and keys ----\n  $('bCube').onclick = () => { const h = surfaceHit(); addCube(h ? h.point : null); };\n  $('bPoint').onclick = addPointAtGhost;\n  $('addHere').onclick = addPointAtGhost;\n  $('bDel').onclick = deleteSelected;\n\n  $('bExport').onclick = () => {\n    let out = '# Low poly export\\n';\n    let base = 0;\n    parts.forEach((p, i) => {\n      if (!p.mesh) return;\n      const pos = p.mesh.geometry.attributes.position;\n      out += 'o ' + (p.name || ('part_' + (i + 1))).replace(/\\s+/g, '_') + '\\n# color ' + (p.color || DEFAULT_COLOR) + '\\n';\n      const m = p.group.matrixWorld;\n      const v = new THREE.Vector3();\n      for (let k = 0; k \u003c pos.count; k++) {\n        v.fromBufferAttribute(pos, k).applyMatrix4(m);\n        out += 'v ' + v.x.toFixed(3) + ' ' + v.y.toFixed(3) + ' ' + v.z.toFixed(3) + '\\n';\n      }\n      for (let k = 0; k \u003c pos.count; k += 3) out += 'f ' + (base + k + 1) + ' ' + (base + k + 2) + ' ' + (base + k + 3) + '\\n';\n      base += pos.count;\n    });\n    $('out').value = out;\n    $('outSec').hidden = false;\n    $('out').focus(); $('out').select();\n  };\n  $('bJson').onclick = () => {\n    $('out').value = JSON.stringify(serialize(), null, 1);\n    $('outSec').hidden = false; $('out').focus(); $('out').select();\n  };\n  $('bLoad').onclick = () => {\n    $('out').value = ''; $('outSec').hidden = false; $('out').focus();\n    modeEl.textContent = 'Paste a Depth 3D JSON into the text box, then press \"Load this JSON\".';\n  };\n  $('bApply').onclick = () => {\n    try { loadModel(JSON.parse($('out').value)); }\n    catch (err) { modeEl.textContent = 'Could not load: ' + (err.message || 'invalid JSON'); }\n  };\n\n  window.addEventListener('keydown', e => {\n    if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;\n    const k = e.key.toLowerCase();\n    if (k === 'c') $('bCube').click();\n    else if (k === 'p') addPointAtGhost();\n    else if (k === 'delete' || k === 'backspace') deleteSelected();\n    else if (k === 'escape') select(null);\n  });\n  post({ type: 'lp:ready' });\n})();\n\u003c/script>\n\n\u003c/body>\u003c/html>"</script>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const nf=(v,d=0)=>Number.isFinite(+v)?+v:d,vec=(a,d)=>[0,1,2].map(i=>Math.max(-12,Math.min(12,nf(a&&a[i],d[i])))),dim=a=>[0,1,2].map(i=>Math.max(.05,Math.min(8,nf(a&&a[i],1)))),hex=c=>/^#[0-9a-f]{6}$/i.test(c)?c:'#8be0a4',rad=a=>[0,1,2].map(i=>Math.max(-360,Math.min(360,nf(a&&a[i],0)))*Math.PI/180);
@@ -539,6 +574,7 @@ scene.add(new THREE.HemisphereLight(0xffffff,0x9fe8c0,1));const sun=new THREE.Di
 const floor=new THREE.Mesh(new THREE.CircleGeometry(4.5,48),new THREE.MeshBasicMaterial({color:0x8fe3a9,transparent:true,opacity:.28}));floor.rotation.x=-Math.PI/2;scene.add(floor);
 const parts=new Map(),view={az:.8,el:.45,d:7,tx:0,ty:.8,tz:0,gd:7,gx:0,gy:.8,gz:0};let spin=true,sel=null;
 let lastBuildMeta={prompt:'',category:'',scene_scale:0.28};
+let effort='mid',variant='classic',d3Ready=false,d3Queue=null,d3Model=null,lastD3={prompt:'',category:''};
 
 /* Procedural Roblox Stud bump map so blocks read like real Roblox Studio bricks */
 const studCanvas=document.createElement('canvas');
@@ -1118,8 +1154,9 @@ async function askServerGenerate(rawQuery,webContext,llm){
   revise:$('#auto-revise').checked,
   tonal_variation:$('#tonal-var').checked,
   use_memory:true,
-  publish:$('#publish-mem').checked
- });
+  publish:$('#publish-mem').checked,
+  effort,variant:'classic'
+ },{maxMs:EFFORT_INFO[effort].ms});
  if(res&&Array.isArray(res.ops)&&res.ops.length)return JSON.stringify(res);
  return null;
 }
@@ -1191,6 +1228,7 @@ function renderDiagnostics(parsed){
   if(m.source=='memory')step('♻ Loaded from global memory'+(m.uses?' (used '+m.uses+'×)':'')+' - no AI call, no API cost'+(m.base_prompt?' · saved prompt: "'+m.base_prompt+'"':''),'ok');
   else if(m.source=='variant')step('🧬 Rebuilt a new variant of "'+m.base_prompt+'"'+(m.added&&m.added.length?' with: '+m.added.join(', '):'')+(m.saved?' · published to global memory':''),'ok');
   else if(m.source=='fresh'&&m.saved)step('🌍 Published to global memory ('+m.total_models+' models shared)','ok');
+  if(m.effort&&m.source!='memory')step('⚙ AI effort: '+(EFFORT_INFO[m.effort]?EFFORT_INFO[m.effort].name:m.effort));
   if(m.saved)loadMemoryLib(true);
  }
  if(parsed.used_serper)step('🌐 Live Serper anatomical research applied','ok');
@@ -1217,6 +1255,92 @@ function renderDiagnostics(parsed){
  }
 }
 
+/* ═══ Depth 3D variant + AI effort ═══ */
+const EFFORT_INFO={
+ low:{name:'Low',hint:'Fastest · simple shapes, no auto-revise, no web research.',ms:150000},
+ mid:{name:'Mid',hint:'Balanced · good detail, one quality pass, light web research.',ms:230000},
+ high:{name:'High',hint:'Deep work, recommended for pro modelers · more parts, longer thinking, two quality passes, deeper research.',ms:360000},
+ extra:{name:'Extra',hint:'Everything in High, but stronger · builds two candidates and keeps the better one, three quality passes. About 2× the API use and the slowest.',ms:520000}
+};
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(_){return null}},lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(_){}};
+function setEffort(e){
+ effort=EFFORT_INFO[e]?e:'mid';
+ $$('#eff-seg button').forEach(b=>{const on=b.dataset.eff==effort;b.classList.toggle('on',on);b.setAttribute('aria-checked',on)});
+ $('#eff-name').textContent=EFFORT_INFO[effort].name;$('#eff-hint').textContent=EFFORT_INFO[effort].hint;
+ lsSet('verdant.effort',effort);
+}
+function setVariant(v){
+ variant=v=='d3'?'d3':'classic';
+ document.body.dataset.variant=variant;
+ $$('#vseg button').forEach(b=>b.classList.toggle('on',b.dataset.var==variant));
+ $$('.nav button[data-variant]').forEach(b=>b.classList.toggle('on',BG.dataset.page=='ai'&&b.dataset.variant==variant));
+ $('#rev-inp').placeholder=variant=='d3'?'Revise the workspace model (e.g. bigger horns, make the head more cartoony)…':'Revise current model (e.g. add glowing gold armor or make wings wider)…';
+ lsSet('verdant.variant',variant);
+ if(variant=='d3'&&BG.dataset.page=='ai')d3Boot();
+ navInd();
+}
+function d3Boot(){
+ const f=$('#d3frame');if(!f||f.dataset.loaded)return;f.dataset.loaded='1';
+ try{f.srcdoc=JSON.parse($('#lp-src').textContent)}catch(e){f.srcdoc='<p style="font:14px sans-serif;padding:16px">The workspace could not be loaded.</p>'}
+}
+function d3Post(msg){
+ const f=$('#d3frame');
+ if(d3Ready&&f&&f.contentWindow)f.contentWindow.postMessage(Object.assign({target:'verdant-lowpoly'},msg),'*');
+ else if(msg.type=='lp:load')d3Queue=msg;
+}
+function d3Load(model,keepView){d3Boot();d3Post({type:'lp:load',model,keepView:!!keepView});d3Model=model;$('#d3-stat').textContent=(model.parts||[]).length+' parts'}
+function d3Get(){
+ return new Promise(res=>{
+  const id=Math.random().toString(36).slice(2),f=$('#d3frame');
+  if(!d3Ready||!f||!f.contentWindow)return res(d3Model);
+  const h=e=>{const d=e.data||{};if(e.source===f.contentWindow&&d.type=='lp:model'&&d.id==id){removeEventListener('message',h);clearTimeout(t);res(d.model)}};
+  const t=setTimeout(()=>{removeEventListener('message',h);res(d3Model)},1500);
+  addEventListener('message',h);d3Post({type:'lp:get',id});
+ });
+}
+addEventListener('message',e=>{
+ const f=$('#d3frame');if(!f||e.source!==f.contentWindow)return;
+ const d=e.data||{};if(d.source!=='verdant-lowpoly')return;
+ if(d.type=='lp:ready'){d3Ready=true;if(d3Queue){const q=d3Queue;d3Queue=null;d3Post(q)}}
+ else if(d.type=='lp:changed'){d3Model=d.model;$('#d3-stat').textContent=d.parts+' parts · '+d.tris+' tris'}
+ else if(d.type=='lp:error')toast(d.message||'Workspace error');
+});
+$$('#eff-seg button').forEach(b=>b.onclick=()=>setEffort(b.dataset.eff));
+$$('#vseg button').forEach(b=>b.onclick=()=>setVariant(b.dataset.var));
+
+async function buildDepth(t){
+ if(location.protocol==='file:'||!serverHealth.online)throw{code:'api',msg:'Depth 3D needs the Verdant server, which teaches the AI how to sculpt low-poly volumes. Open the site from your server URL.'};
+ const llm=readyLLM();
+ step('Sculpting low-poly volumes with '+(llm?PV[llm].name+' ('+mod(llm)+')':'Verdant Cloud AI')+' · '+EFFORT_INFO[effort].name+' effort…');
+ const r=await runJob('/jobs/generate',{
+  prompt:t,use_serper:$('#use-serper').checked,provider:llm||'',model:llm?mod(llm):'',api_key:llm?AI.key[llm]:'',
+  serper_key:readySerper(),category:$('#cat-sel').value||'',revise:$('#auto-revise').checked,
+  tonal_variation:$('#tonal-var').checked,use_memory:true,publish:$('#publish-mem').checked,
+  variant:'depth3d',effort
+ },{maxMs:EFFORT_INFO[effort].ms});
+ if(!r||!Array.isArray(r.hulls)||!r.hulls.length)throw{code:'empty'};
+ lastD3={prompt:t,category:r.category||''};
+ d3Load({title:r.title,parts:r.hulls});
+ progSet(100);
+ renderDiagnostics(r);
+ step('Done: '+r.title+' · '+((r.stats&&r.stats.parts)||r.hulls.length)+' parts'+(r.build_seconds?' in '+r.build_seconds+'s':'')+'. Drag points, scale parts or recolour in the workspace.','ok');
+}
+async function reviseDepth(instruction,llm){
+ const cur=await d3Get();
+ if(!cur||!cur.parts||!cur.parts.length)throw{code:'api',msg:'The workspace is empty. Build or load a model first.'};
+ step('Revising the workspace model ('+cur.parts.length+' parts): "'+instruction+'"…');
+ const r=await runJob('/jobs/revise',{
+  instruction,hulls:cur.parts,variant:'depth3d',effort,
+  prompt:lastD3.prompt||cur.title||$('#prompt').value.trim()||'the current model',
+  category:lastD3.category||$('#cat-sel').value||'',
+  provider:llm||'',model:llm?mod(llm):'',api_key:llm?AI.key[llm]:'',tonal_variation:$('#tonal-var').checked
+ },{maxMs:EFFORT_INFO[effort].ms});
+ if(!r||!Array.isArray(r.hulls))throw{code:'net'};
+ d3Load({title:r.title,parts:r.hulls},true);
+ progSet(100);renderDiagnostics(r);
+ step('Revision complete: '+r.title,'ok');
+}
+
 let busy=false;
 async function build(){
  const t=$('#prompt').value.trim();
@@ -1225,6 +1349,7 @@ async function build(){
  busy=true;$('#build').disabled=true;$('#rev-btn').disabled=true;$('#build').textContent='Building…';$('#rc').classList.add('busy');$('#steps').innerHTML='';progSet(0,true);heat(1);
  if(K.value.trim()&&!AI.on[AI.view]){await connect()}
  try{
+  if(variant=='d3'){await buildDepth(t)}else{
   const webCtx=await fetchWebResearch(t);
   const via=readyLLM();
   step('Sculpting 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Verdant v19 Cloud AI')+'…');
@@ -1242,6 +1367,7 @@ async function build(){
   snap();
   renderDiagnostics(parsed);
   step('Done: '+parsed.title+'. Ready for your game!','ok');
+  }
  }catch(e){
   step(why(e,readyLLM()),'bad');
   if(e&&e.msg)step(e.msg,'bad');
@@ -1253,12 +1379,13 @@ async function build(){
 async function reviseModel(){
  const instruction=$('#rev-inp').value.trim();
  if(!instruction)return toast('Type a revision instruction first');
- if(!parts.size)return toast('Build or open a model first before revising');
+ if(variant!='d3'&&!parts.size)return toast('Build or open a model first before revising');
  if(busy)return;
  busy=true;$('#build').disabled=true;$('#rev-btn').disabled=true;$('#rev-btn').textContent='Revising…';$('#rc').classList.add('busy');$('#steps').innerHTML='';progSet(0,true);heat(1);
  if(K.value.trim()&&!AI.on[AI.view]){await connect()}
  const llm=readyLLM();
  try{
+  if(variant=='d3'){await reviseDepth(instruction,llm)}else{
   step('Revising model ('+parts.size+' parts): "'+instruction+'"…');
   const currentOps=exportCurrentOps();
   const r=await runJob('/jobs/revise',{
@@ -1283,6 +1410,7 @@ async function reviseModel(){
   renderDiagnostics(parsed);
   $('#rev-inp').value='';
   step('Revision complete: '+parsed.title,'ok');
+  }
  }catch(e){
   step(why(e,llm),'bad');
   if(e&&e.msg)step(e.msg,'bad');
@@ -1323,7 +1451,7 @@ async function loadMemoryLib(force){
    const b=document.createElement('button');b.className='card tile';b.innerHTML='<div class="ic"></div><b></b><span></span>';
    b.children[0].innerHTML=ico('box');
    b.children[1].textContent=it.title||it.prompt;
-   b.children[2].textContent=it.parts+' parts · used '+it.uses+'×'+(it.parent_id?' · variant':'');
+   b.children[2].textContent=(it.variant=='depth3d'?'Depth 3D · ':'')+it.parts+' parts · '+(EFFORT_INFO[it.effort]?EFFORT_INFO[it.effort].name:'Mid')+' · used '+it.uses+'×'+(it.parent_id?' · variant':'');
    b.title=it.prompt;
    b.onclick=()=>openMemoryModel(it);
    box.appendChild(b);
@@ -1335,6 +1463,10 @@ async function openMemoryModel(it){
  try{
   toast('Opening “'+(it.title||it.prompt)+'”…');
   const r=await api('/memory/'+encodeURIComponent(it.id)+'?tonal='+($('#tonal-var').checked?'true':'false'),{},30000);
+  if(r.variant=='depth3d'&&Array.isArray(r.hulls)){
+   setVariant('d3');go('ai');lastD3={prompt:it.prompt,category:r.category||''};
+   d3Load({title:r.title,parts:r.hulls});toast('Loaded from global memory - no AI call');loadMemoryLib(true);return;
+  }
   const parsed=parseAIResponse(JSON.stringify(r));
   wipe();go('parts');
   lastBuildMeta={prompt:it.prompt,category:parsed.category||'',scene_scale:(parsed.stats&&parsed.stats.scene_scale)||0.28};
@@ -1343,6 +1475,7 @@ async function openMemoryModel(it){
   loadMemoryLib(true);
  }catch(e){toast('Could not open that model')}
 }
+setEffort(lsGet('verdant.effort')||'mid');setVariant(lsGet('verdant.variant')||'classic');
 $('#mem-q').addEventListener('input',()=>{clearTimeout(memTimer);memTimer=setTimeout(()=>loadMemoryLib(true),300)});
 $('#mem-sort').onclick=e=>{memSort=memSort=='popular'?'new':'popular';e.currentTarget.textContent=memSort=='popular'?'Most used':'Newest';loadMemoryLib(true)};
 
@@ -1354,11 +1487,11 @@ st.onpointerdown=e=>{drag=[e.clientX,e.clientY];st.setPointerCapture(e.pointerId
 st.onpointermove=e=>{if(!drag)return;view.az-=(e.clientX-drag[0])*.008;view.el=Math.max(.05,Math.min(1.45,view.el+(e.clientY-drag[1])*.006));drag=[e.clientX,e.clientY];if(spin){spin=false;$('#spin').classList.remove('on')}};
 st.onpointerup=()=>{drag=null;st.style.cursor=''};
 function navInd(){const on=$('.nav button.on'),ind=$('.nav-ind');if(!on||!ind)return;ind.style.transform='translateY('+on.offsetTop+'px)';ind.style.height=on.offsetHeight+'px';requestAnimationFrame(()=>requestAnimationFrame(()=>ind.classList.remove('n')))}
-function go(n){$$('.page').forEach(p=>p.classList.toggle('on',p.id=='p-'+n));$$('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.go==n));navInd();
+function go(n){$$('.page').forEach(p=>p.classList.toggle('on',p.id=='p-'+n));$$('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.go==n&&(!b.dataset.variant||b.dataset.variant==variant)));navInd();if(n=='ai'&&variant=='d3')d3Boot();
  BG.dataset.page=n;if(n=='library')loadMemoryLib();
  const sl=$('#slot-'+n),rc=$('#rc');(sl||$('#park')).appendChild(rc);if(sl){rc.classList.remove('in');void rc.offsetWidth;rc.classList.add('in')}
  $$('#p-'+n+' .stag>*').forEach((c,i)=>{c.style.animation='none';void c.offsetWidth;c.style.animation='';c.style.animationDelay=i*70+'ms'});scrollTo(0,0)}
-$$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+$$('[data-go]').forEach(b=>b.onclick=()=>{if(b.dataset.variant)setVariant(b.dataset.variant);go(b.dataset.go)});
 addEventListener('resize',navInd);
 addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key=='z'){e.preventDefault();undo()}});
 const tog=$('#tog');
