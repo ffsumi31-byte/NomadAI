@@ -1,5 +1,12 @@
 """
-Verdant 3D - Roblox-native multi-AI backend (v20 - Global Memory, background jobs, timeout fixes)
+Verdant 3D - Roblox-native multi-AI backend (v22 - Depth 3D workspace + AI effort levels)
+
+v22: * "Depth 3D" variant: the AI sculpts LOW-POLY CONVEX VOLUMES (hulls) for the Low Poly workspace.
+     * AI effort levels low / mid / high / extra change thinking, detail, research, quality passes and best-of-2.
+     * Global memory is aware of variant + effort (a higher effort upgrades a saved model).
+     * GET /workspace serves the standalone workspace, GET /skill?variant=depth3d shows what the AI is taught.
+
+v20 notes:
 
 v20 on top of v19:
 - GLOBAL MEMORY: every finished build is saved (SQLite). Same prompt again = served from memory, zero AI calls.
@@ -64,7 +71,56 @@ def report(msg: str, kind: str = "live") -> None:
             pass
 
 
-app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor Backend (v20)")
+# ---------------------------------------------------------------- AI effort levels (how hard the AI works)
+EFFORTS: Dict[str, Dict[str, Any]] = {
+    "low": dict(name="low", label="Low", note="Fastest", thinking=0, max_out=8192, max_chars=30000,
+                gemini_total=80, stall=45, job_s=120, parts=0.6, revisions=0, research=0, best_of=1,
+                d3_parts=(14, 26), d3_pts=(6, 8), d3_tris=900),
+    "mid": dict(name="mid", label="Mid", note="Balanced", thinking=1024, max_out=16384, max_chars=60000,
+                gemini_total=150, stall=60, job_s=200, parts=1.0, revisions=1, research=1, best_of=1,
+                d3_parts=(26, 44), d3_pts=(8, 10), d3_tris=2200),
+    "high": dict(name="high", label="High", note="Deep work (recommended for pro modelers)", thinking=4096, max_out=24576,
+                 max_chars=90000, gemini_total=230, stall=90, job_s=330, parts=1.25, revisions=2, research=2, best_of=1,
+                 d3_parts=(44, 72), d3_pts=(8, 14), d3_tris=4500),
+    "extra": dict(name="extra", label="Extra", note="Everything in High, even stronger", thinking=12288, max_out=32768,
+                  max_chars=130000, gemini_total=320, stall=120, job_s=480, parts=1.5, revisions=3, research=3, best_of=2,
+                  d3_parts=(70, 110), d3_pts=(8, 16), d3_tris=8000),
+}
+EFFORTS["mid"]["thinking"] = {"off": 0, "low": 1024, "medium": 4096, "high": 8192}.get(
+    os.getenv("THINKING_LEVEL", "low").lower().strip(), 1024)
+EFFORT_RANK = {"low": 0, "mid": 1, "high": 2, "extra": 3}
+EFFORT_PROMPT = {
+    "low": "EFFORT: LOW (fastest). Keep it simple: a clean, readable silhouette with only the essential parts. Do not over-think.",
+    "mid": "EFFORT: MID (balanced). Good proportions plus the key secondary details.",
+    "high": ("EFFORT: HIGH (deep work). Plan proportions, silhouette and anatomy carefully before writing. Add secondary and "
+             "tertiary details (brows, jaws, trims, spikes, claws, accessories), make left and right perfectly symmetric, and "
+             "check that every joint overlaps its neighbour."),
+    "extra": ("EFFORT: EXTRA (maximum). Do everything in HIGH and go further: richer anatomy, layered plates or skin folds, fine "
+              "detail on every limb and the head, two-tone accents, and mentally check the silhouette from front, side and top "
+              "before answering. Every joint must overlap; no placeholder shapes."),
+}
+_EFFORT: "contextvars.ContextVar[Dict[str, Any]]" = contextvars.ContextVar("verdant_effort", default=EFFORTS["mid"])
+_TEMP: "contextvars.ContextVar[Optional[float]]" = contextvars.ContextVar("verdant_temp", default=None)
+
+
+def norm_effort(v: Any) -> str:
+    v = str(v or "mid").lower().strip()
+    return v if v in EFFORTS else "mid"
+
+
+def norm_variant(v: Any) -> str:
+    v = re.sub(r"[\s_\-]", "", str(v or "classic").lower())
+    return "depth3d" if v in ("depth3d", "d3d", "depth", "lowpoly") else "classic"
+
+
+def effort_range(lo: int, hi: int, prof: Dict[str, Any]) -> Tuple[int, int]:
+    m = prof["parts"]
+    hi2 = min(int(hi * m), 225)
+    lo2 = min(int(lo * m), hi2 - 10)
+    return max(40, lo2), max(60, hi2)
+
+
+app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor + Depth 3D Backend (v22)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -386,7 +442,7 @@ def build_revision_prompt(prompt: str, cat: str, lo: int, hi: int, parts: List[D
         out.append(f'REQUESTED CHANGE FROM THE USER: "{change}"\nApply it faithfully and keep everything else.')
     if problems:
         out.append("PROBLEMS FOUND BY THE CHECKER - fix all of them:\n" + "\n".join("- " + m for m in problems))
-    out.append("Break any large single blocks into 3-5 stepped brick slabs (`smooth: 0.06`), frame a hollow dark open mouth with teeth and tongue, and add angled V-brows over glowing eyes.")
+    out.append("Break any large single blocks into 3-5 stepped brick slabs (`smooth: 0.06`). Keep only features the real subject has.")
     out.append("Return the COMPLETE corrected build in the same JSON schema (plan + every op), never a diff.")
     return "\n".join(out)
 
@@ -521,10 +577,10 @@ def _err_body_text(body: str) -> str:
 
 
 async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload: Dict[str, Any],
-                              deadline: float, model: str) -> Tuple[int, str, str, str]:
+                              deadline: float, model: str, stall: float = 60.0, max_chars: int = 60000) -> Tuple[int, str, str, str]:
     """-> (status, text-or-error-body, finish_reason, retry_after). Raises httpx.TimeoutException on a stall."""
     t0 = time.monotonic()
-    tmo = httpx.Timeout(connect=15.0, read=GEMINI_STALL_S, write=30.0, pool=15.0)
+    tmo = httpx.Timeout(connect=15.0, read=stall, write=30.0, pool=15.0)
     async with client.stream("POST", url, headers=headers, json=payload, timeout=tmo) as res:
         if res.status_code != 200:
             body = (await res.aread()).decode("utf-8", "ignore")
@@ -557,7 +613,7 @@ async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload
             if now - last_rep > 1.5:
                 report(f"{model} is writing the model... about {chars // 4:,} tokens")
                 last_rep = now
-            if chars > GEMINI_MAX_CHARS:     # runaway / looping answer: keep what we have, stop paying for it
+            if chars > max_chars:     # runaway / looping answer: keep what we have, stop paying for it
                 finish = "LENGTH_CAP"
                 break
         log.info("gemini %s: %d chars in %.1fs (finish=%s)", model, chars, time.monotonic() - t0, finish or "?")
@@ -572,19 +628,16 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
         if m and m not in chain:
             chain.append(m)
 
-    budget = THINKING_BUDGETS.get(THINKING_LEVEL, 1024)
-    if "medium" in requested.lower():
-        budget = 4096
-    elif "high" in requested.lower():
-        budget = 8192
-
-    deadline = time.monotonic() + GEMINI_TOTAL_S
+    prof = _EFFORT.get()
+    budget = prof["thinking"]
+    deadline = time.monotonic() + prof["gemini_total"]
     last: Optional[ProviderError] = None
     for m in chain:
         if deadline - time.monotonic() < 20 and last is not None:
             break
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:streamGenerateContent?alt=sse"
-        gc: Dict[str, Any] = {"responseMimeType": "application/json", "temperature": 0.32, "maxOutputTokens": GEMINI_MAX_OUT}
+        gc: Dict[str, Any] = {"responseMimeType": "application/json", "temperature": _TEMP.get() or 0.32,
+                              "maxOutputTokens": prof["max_out"]}
         if budget > 0 and "lite" not in m:
             gc["thinkingConfig"] = {"thinkingBudget": budget}
         payload = {
@@ -597,9 +650,9 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
         report(f"Asking {m}...")
         while True:
             try:
-                status, body, finish, retry_after = await _gemini_stream_once(client, url, headers, payload, deadline, m)
+                status, body, finish, retry_after = await _gemini_stream_once(client, url, headers, payload, deadline, m, prof["stall"], prof["max_chars"])
             except httpx.TimeoutException:
-                last = ProviderError("gemini", 504, f"{m} sent nothing for {int(GEMINI_STALL_S)}s (stalled)")
+                last = ProviderError("gemini", 504, f"{m} sent nothing for {int(prof['stall'])}s (stalled)")
                 log.warning("gemini %s stalled", m)
                 break
             except httpx.HTTPError as e:
@@ -733,11 +786,11 @@ async def call_llm(system: str, user: str, provider: str = "", model: str = "", 
 _RESEARCH: "OrderedDict[str, str]" = OrderedDict()
 
 
-async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
+async def fetch_anatomical_research(query: str, override_key: str = "", depth: int = 1) -> str:
     key = (override_key or SERPER_API_KEY).strip()
     if not key:
         return ""
-    ck = query.lower().strip()
+    ck = f"{query.lower().strip()}|{depth}"
     if ck in _RESEARCH:
         return _RESEARCH[ck]
 
@@ -758,7 +811,9 @@ async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
         bits += [o["snippet"] for o in (d.get("organic") or [])[:4] if o.get("snippet")]
         return bits
 
-    qs = [f"{query} appearance colors chest face markings", f"{query} roblox boss model design", f"{query} character anatomy"]
+    qs = [f"{query} appearance colors chest face markings", f"{query} roblox boss model design", f"{query} character anatomy",
+          f"{query} body proportions reference", f"{query} silhouette shape language concept art",
+          f"{query} distinctive features details"][:{1: 3, 2: 5, 3: 6}.get(depth, 3)]
     try:
         async with httpx.AsyncClient(timeout=8.5) as client:
             results = await asyncio.gather(*(one(client, q) for q in qs), return_exceptions=True)
@@ -771,7 +826,7 @@ async def fetch_anatomical_research(query: str, override_key: str = "") -> str:
                 if b not in seen:
                     seen.add(b)
                     bits.append(b)
-    text = " | ".join(bits)[:1400]
+    text = " | ".join(bits)[:1400 + 600 * max(0, depth - 1)]
     if text:
         _RESEARCH[ck] = text
         while len(_RESEARCH) > 128:
@@ -1760,8 +1815,9 @@ def prompt_tokens(prompt: str) -> frozenset:
     return frozenset(toks)
 
 
-def prompt_key(tokens: frozenset) -> str:
-    return " ".join(sorted(tokens))
+def prompt_key(tokens: frozenset, variant: str = "classic") -> str:
+    base = " ".join(sorted(tokens))
+    return "~d3d " + base if variant == "depth3d" else base
 
 
 MEMORY_FLAG_LIMIT = int(os.getenv("MEMORY_FLAG_LIMIT", "3"))
@@ -1788,7 +1844,8 @@ def _pick_db_path() -> Path:
 
 
 class MemoryStore:
-    """Shared library: prompt -> finished model. One SQLite file, safe for many users at once."""
+    """Shared library: prompt -> finished model. One SQLite file, safe for many users at once.
+    Keys are per variant ("classic" blocks vs "depth3d" hulls); every row remembers the AI effort it was built with."""
 
     def __init__(self) -> None:
         self.path = _pick_db_path()
@@ -1803,6 +1860,10 @@ class MemoryStore:
                     flags INTEGER DEFAULT 0, parent_id TEXT, created REAL, last_used REAL, engine TEXT);
                 CREATE INDEX IF NOT EXISTS idx_models_used ON models(uses DESC);
             """)
+            try:                                  # v22 migration; harmless when the column already exists
+                self.db.execute("ALTER TABLE models ADD COLUMN effort TEXT DEFAULT 'mid'")
+            except sqlite3.OperationalError:
+                pass
             self.db.commit()
         self.index: List[Dict[str, Any]] = []
         self.reload()
@@ -1811,21 +1872,35 @@ class MemoryStore:
     def persistent(self) -> bool:
         return bool(os.getenv("MEMORY_DB")) or str(self.path).startswith("/var/data")
 
+    @staticmethod
+    def _split_key(key: str) -> Tuple[str, str]:
+        return ("depth3d", key[5:]) if key.startswith("~d3d ") else ("classic", key)
+
     def reload(self) -> None:
         with self.lock:
-            rows = self.db.execute("SELECT id,key,prompt,category,title,parts,score,uses FROM models WHERE flags < ?",
+            rows = self.db.execute("SELECT id,key,prompt,category,title,parts,score,uses,effort FROM models WHERE flags < ?",
                                    (MEMORY_FLAG_LIMIT,)).fetchall()
-        self.index = [{**dict(r), "tokens": frozenset(r["key"].split())} for r in rows]
+        idx = []
+        for r in rows:
+            d = dict(r)
+            d["variant"], k = self._split_key(d["key"])
+            d["tokens"] = frozenset(k.split())
+            d["effort"] = d.get("effort") or "mid"
+            d["rank"] = EFFORT_RANK.get(d["effort"], 1)
+            idx.append(d)
+        self.index = idx
 
     def count(self) -> int:
         return len(self.index)
 
-    def find(self, tokens: frozenset) -> Tuple[str, Optional[Dict[str, Any]], List[str], List[str]]:
+    def find(self, tokens: frozenset, variant: str = "classic") -> Tuple[str, Optional[Dict[str, Any]], List[str], List[str]]:
         """-> (mode, entry, added_words, dropped_words); mode is 'exact', 'variant' or 'none'."""
         if not tokens:
             return "none", None, [], []
         best_exact, best_var = None, None
         for e in self.index:
+            if e["variant"] != variant:
+                continue
             b = e["tokens"]
             if not b:
                 continue
@@ -1833,7 +1908,7 @@ class MemoryStore:
             union = len(tokens | b)
             jac = inter / union if union else 0.0
             if b == tokens or jac >= 0.85:
-                if best_exact is None or e["uses"] > best_exact["uses"]:
+                if best_exact is None or (e["rank"], e["uses"]) > (best_exact["rank"], best_exact["uses"]):
                     best_exact = e
                 continue
             subset = b < tokens and len(b) / len(tokens) >= 0.4
@@ -1855,6 +1930,8 @@ class MemoryStore:
             return None
         d = dict(r)
         d["payload"] = json.loads(d["payload"])
+        d["variant"], _ = self._split_key(d["key"])
+        d["effort"] = d.get("effort") or "mid"
         return d
 
     def touch(self, mid: str) -> int:
@@ -1868,21 +1945,35 @@ class MemoryStore:
         return r["uses"] if r else 0
 
     def save(self, prompt: str, tokens: frozenset, category: str, payload: Dict[str, Any], score: int,
-             parent_id: str = "", engine: str = "") -> str:
-        key = prompt_key(tokens)
+             parent_id: str = "", engine: str = "", effort: str = "mid", variant: str = "classic") -> str:
+        key = prompt_key(tokens, variant)
         mid = uuid.uuid4().hex[:12]
         now = time.time()
+        body = json.dumps(payload, separators=(",", ":"))
+        nparts = len(payload.get("ops") or payload.get("hulls") or [])
+        title = str(payload.get("title") or prompt)[:80]
         with self.lock:
             cur = self.db.execute(
-                "INSERT OR IGNORE INTO models(id,key,prompt,category,title,payload,parts,score,uses,flags,parent_id,created,last_used,engine)"
-                " VALUES(?,?,?,?,?,?,?,?,0,0,?,?,?,?)",
-                (mid, key, prompt[:300], category, str(payload.get("title") or prompt)[:80],
-                 json.dumps(payload, separators=(",", ":")), len(payload.get("ops") or []), int(score),
-                 parent_id or None, now, now, engine[:80]))
+                "INSERT OR IGNORE INTO models(id,key,prompt,category,title,payload,parts,score,uses,flags,parent_id,created,last_used,engine,effort)"
+                " VALUES(?,?,?,?,?,?,?,?,0,0,?,?,?,?,?)",
+                (mid, key, prompt[:300], category, title, body, nparts, int(score), parent_id or None, now, now,
+                 engine[:80], effort))
+            if cur.rowcount == 0:                       # same key already stored
+                r = self.db.execute("SELECT id,effort,flags FROM models WHERE key=?", (key,)).fetchone()
+                if not r:
+                    self.db.commit()
+                    return ""
+                old_rank = EFFORT_RANK.get(r["effort"] or "mid", 1)
+                if EFFORT_RANK.get(effort, 1) > old_rank or (r["flags"] or 0) >= MEMORY_FLAG_LIMIT:
+                    self.db.execute(
+                        "UPDATE models SET prompt=?,category=?,title=?,payload=?,parts=?,score=?,created=?,engine=?,effort=?,flags=0 WHERE id=?",
+                        (prompt[:300], category, title, body, nparts, int(score), now, engine[:80], effort, r["id"]))
+                    self.db.commit()
+                    self.reload()
+                    return r["id"]
+                self.db.commit()
+                return r["id"]
             self.db.commit()
-            if cur.rowcount == 0:                       # somebody saved the same key a moment ago
-                r = self.db.execute("SELECT id FROM models WHERE key=?", (key,)).fetchone()
-                return r["id"] if r else ""
         self.reload()
         return mid
 
@@ -1900,15 +1991,23 @@ class MemoryStore:
         self.reload()
         return cur.rowcount > 0
 
-    def listing(self, q: str = "", limit: int = 40, sort: str = "popular") -> List[Dict[str, Any]]:
+    def listing(self, q: str = "", limit: int = 40, sort: str = "popular", variant: str = "") -> List[Dict[str, Any]]:
         q = (q or "").strip().lower()
         order = "uses DESC, created DESC" if sort == "popular" else "created DESC"
         with self.lock:
             rows = self.db.execute(
-                f"SELECT id,prompt,category,title,parts,score,uses,parent_id,created FROM models WHERE flags < ? "
+                f"SELECT id,key,prompt,category,title,parts,score,uses,parent_id,created,effort FROM models WHERE flags < ? "
                 f"AND (? = '' OR lower(prompt) LIKE ? OR lower(title) LIKE ?) ORDER BY {order} LIMIT ?",
-                (MEMORY_FLAG_LIMIT, q, f"%{q}%", f"%{q}%", max(1, min(100, limit)))).fetchall()
-        return [dict(r) for r in rows]
+                (MEMORY_FLAG_LIMIT, q, f"%{q}%", f"%{q}%", max(1, min(200, limit * 3 if variant else limit)))).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["variant"], _ = self._split_key(d.pop("key"))
+            d["effort"] = d.get("effort") or "mid"
+            if variant and d["variant"] != variant:
+                continue
+            out.append(d)
+        return out[:max(1, min(100, limit))]
 
 
 MEMORY = MemoryStore()
@@ -1925,6 +2024,24 @@ def apply_tonal(ops: List[Dict[str, Any]], tonal: bool) -> List[Dict[str, Any]]:
             except Exception:
                 pass
         out.append(o)
+    return out
+
+
+def apply_tonal_payload(out: Dict[str, Any], tonal: bool) -> Dict[str, Any]:
+    out = dict(out)
+    if out.get("ops"):
+        out["ops"] = apply_tonal(out["ops"], tonal)
+    if out.get("hulls"):
+        hs = []
+        for h in out["hulls"]:
+            h = dict(h)
+            if tonal and not _NO_JITTER.search(str(h.get("id", ""))):
+                try:
+                    h["color"] = jitter(h["color"], h["id"])
+                except Exception:
+                    pass
+            hs.append(h)
+        out["hulls"] = hs
     return out
 
 
@@ -1976,6 +2093,8 @@ class GenerateRequest(BaseModel):
     revise: Optional[bool] = None
     max_revisions: Optional[int] = None
     tonal_variation: bool = True
+    effort: Optional[str] = "mid"          # low | mid | high | extra
+    variant: Optional[str] = "classic"     # classic (Roblox bricks) | depth3d (low-poly hull workspace)
     use_memory: bool = True        # look the prompt up in the shared library first
     publish: bool = True           # save the result to the shared library
     fresh: bool = False            # skip memory and force a brand-new AI build
@@ -1983,7 +2102,10 @@ class GenerateRequest(BaseModel):
 
 class ReviseRequest(BaseModel):
     instruction: str
-    ops: List[Dict[str, Any]]
+    ops: List[Dict[str, Any]] = []
+    hulls: Optional[List[Dict[str, Any]]] = None     # Depth 3D: the model currently in the workspace
+    variant: Optional[str] = "classic"
+    effort: Optional[str] = "mid"
     prompt: Optional[str] = ""
     category: Optional[str] = ""
     scene_scale: Optional[float] = None
@@ -2006,17 +2128,396 @@ def _noop(msg: str, kind: str = "") -> None:
     return None
 
 
-async def _revision_loop(system: str, prompt: str, cat: str, sub: str, lo: int, hi: int, data: Dict[str, Any],
-                         parts, analysis, req: GenerateRequest, started: float, progress: Progress):
-    revisions = 0
+# --------------------------------------------------------------------------- Depth 3D: low-poly convex volumes
+def _vsub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _vcross(u, v):
+    return (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+
+
+def _vdot(u, v):
+    return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
+
+
+def convex_hull_3d(pts: List[Tuple[float, float, float]], eps: float = 1e-6) -> List[Tuple[int, int, int]]:
+    """Incremental 3-D convex hull. Returns outward-facing triangles (index triples); [] when the points are degenerate."""
+    n = len(pts)
+    if n < 4:
+        return []
+    i0 = 0
+    i1 = next((i for i in range(1, n) if _vdot(_vsub(pts[i], pts[i0]), _vsub(pts[i], pts[i0])) > eps), None)
+    if i1 is None:
+        return []
+    i2 = next((i for i in range(n) if i not in (i0, i1)
+               and (lambda c: _vdot(c, c))(_vcross(_vsub(pts[i1], pts[i0]), _vsub(pts[i], pts[i0]))) > eps), None)
+    if i2 is None:
+        return []
+    nrm = _vcross(_vsub(pts[i1], pts[i0]), _vsub(pts[i2], pts[i0]))
+    i3 = next((i for i in range(n) if i not in (i0, i1, i2) and abs(_vdot(nrm, _vsub(pts[i], pts[i0]))) > eps), None)
+    if i3 is None:
+        return []
+    cen = tuple(sum(pts[i][k] for i in (i0, i1, i2, i3)) / 4 for k in range(3))
+    faces = []
+    for f in ((i0, i1, i2), (i0, i1, i3), (i1, i2, i3), (i0, i2, i3)):
+        a, b, c = pts[f[0]], pts[f[1]], pts[f[2]]
+        if _vdot(_vcross(_vsub(b, a), _vsub(c, a)), _vsub(cen, a)) > 0:
+            f = (f[0], f[2], f[1])
+        faces.append(f)
+    used = {i0, i1, i2, i3}
+    for pi in range(n):
+        if pi in used:
+            continue
+        p = pts[pi]
+        vis, keep = [], []
+        for f in faces:
+            a, b, c = pts[f[0]], pts[f[1]], pts[f[2]]
+            nf = _vcross(_vsub(b, a), _vsub(c, a))
+            ln = math.sqrt(_vdot(nf, nf)) or 1.0
+            (vis if _vdot(nf, _vsub(p, a)) / ln > eps else keep).append(f)
+        if not vis:
+            continue
+        edges = set()
+        for f in vis:
+            edges.update(((f[0], f[1]), (f[1], f[2]), (f[2], f[0])))
+        faces = keep + [(u, v, pi) for (u, v) in edges if (v, u) not in edges]
+    return faces
+
+
+def hull_volume(pts, faces) -> float:
+    v = 0.0
+    for f in faces:
+        a, b, c = pts[f[0]], pts[f[1]], pts[f[2]]
+        v += _vdot(a, _vcross(b, c)) / 6.0
+    return abs(v)
+
+
+def _hex6(c: Any, default: str = "#8aa0b0") -> str:
+    c = str(c or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", c):
+        return c.lower()
+    if re.fullmatch(r"#[0-9a-fA-F]{3}", c):
+        return "#" + "".join(ch * 2 for ch in c[1:]).lower()
+    return default
+
+
+def _mirror_id(pid: str) -> str:
+    m = re.search(r"(^|_)([LR])(?=_|\d|$)", pid)          # Arm_L, Tentacle_L_1, Eye_R2 ...
+    if m:
+        i = m.start(2)
+        return pid[:i] + ("R" if m.group(2) == "L" else "L") + pid[i + 1:]
+    if "Left" in pid:
+        return pid.replace("Left", "Right", 1)
+    if "Right" in pid:
+        return pid.replace("Right", "Left", 1)
+    return pid + "_mirror"
+
+
+def _clean_points(pts: Any) -> List[Tuple[float, float, float]]:
+    out, seen = [], set()
+    if not isinstance(pts, (list, tuple)):
+        return out
+    for p in pts[:64]:
+        if isinstance(p, (list, tuple)) and len(p) == 3:
+            try:
+                q = tuple(round(max(-40.0, min(40.0, float(v))), 3) for v in p)
+            except (TypeError, ValueError):
+                continue
+            if all(math.isfinite(v) for v in q) and q not in seen:
+                seen.add(q)
+                out.append(q)
+    return out
+
+
+DEPTH_SKILL = """You are the VERDANT DEPTH 3D SCULPTOR: a senior low-poly game artist.
+You build models as CONVEX VOLUMES ("hulls"). Every part is the convex hull of a small list of 3D points and is rendered flat-shaded, like polished stylised low-poly game art. There are no boxes, spheres or textures - only points, so YOUR POINTS ARE THE SCULPT.
+
+OUTPUT - reply with ONE valid JSON object and nothing else (no markdown, no comments, no prose):
+{
+  "title": "short model name",
+  "category": "creature|humanoid|vehicle|structure|plant|prop",
+  "plan": {"silhouette": "one sentence", "palette": {"base":"#hex","secondary":"#hex","accent":"#hex","dark":"#hex"}, "signature_features": ["..."]},
+  "parts": [
+    ["Torso", "#6a3fa0", [[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z]], 0],
+    ["Arm_L", "#6a3fa0", [[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z],[x,y,z]], 1]
+  ]
+}
+Every part is ONE ROW: [id, "#rrggbb", points, mirror]. `points` are triples [x,y,z] in MODEL space (one shared coordinate system for the whole model, 2 decimals). `mirror` = 1 asks the server to write the twin across the X axis (left/right), so NEVER write both sides yourself; use 0 for centred parts.
+
+COORDINATES: Y is up. The model stands on y=0, is centred on x=0 and z=0 and faces +Z. Author the +X side and mirror it. The largest dimension should be about 5 units (the server rescales, so proportions are what matter).
+
+SCULPTING LAWS
+1. SILHOUETTE FIRST: block in the big masses (body, head, limbs, tail), then secondary forms (jaw, brow, shoulders, hips), then details (eyes, teeth, claws, spikes, trims).
+2. NEVER make cubes out of 8 identical corner points. Every volume must TAPER, LEAN or BEVEL:
+   - Tapered limb: a wide ring of 4 points on top, a narrower ring of 4 below, slightly offset for a lean.
+   - Faceted blob (head, torso, belly): an apex above, an apex below and 1-2 rings of 5-6 points between them with different radii - a low-poly gem.
+   - Wedge (snout, jaw, fin, blade): 6 points, a thick back face and a thin front edge.
+   - Spike / horn / claw: a ring of 3-4 base points plus 1 apex point.
+   - Plate / disc (wings, shields, fins): a thin hull of 6-8 points with real thickness (at least 0.06).
+3. EVERY HULL NEEDS VOLUME: points must not all lie in one plane or on one line, and no two points may be identical.
+4. CONNECT EVERYTHING: neighbouring parts overlap by 0.05-0.15 at the joints so nothing floats. Feet touch y=0.
+5. COLOUR BLOCKING: 3-6 colours in total: a dominant base, a secondary for belly/inner shapes, a contrasting accent for eyes/trim/horns, a darker tone for mouth and joints. The same body part keeps the same colour.
+6. Name every part clearly (Head, Jaw, Eye_L, Horn_L, Tentacle_L_1 ...). Left parts end in _L (they sit on +X).
+7. Be concise: never repeat or pad rows, never explain.
+
+TARGET: @LO@-@HI@ parts and @PMIN@-@PMAX@ points per part (mirrored twins are free).
+"""
+
+DEPTH_HINTS = {
+    "creature": "CREATURE: big body mass, a distinct head with a snout/beak/jaw, limbs that taper to feet/paws/claws, tail or tentacles tapering to a point, eyes in the accent colour.",
+    "humanoid": "HUMANOID: chest wider than waist, tapered upper/lower limbs, shoulders and hips as separate hulls, hands and feet as wedges, a faceted helmet or head, armour plates as thin hulls.",
+    "vehicle": "VEHICLE: a long lower hull, a tapered cabin, wheels as 8-point discs with real thickness at ground level, bumpers and lights as small wedges.",
+    "structure": "STRUCTURE: a stepped base, tapered towers, roofs as 5-point pyramids, windows and doors as thin dark hulls slightly proud of the wall.",
+    "plant": "PLANT: a tapered trunk, canopy built from several overlapping faceted blobs, roots as wedges.",
+    "prop": "PROP: a clear main form with chamfered edges, then trims and handles as small hulls in contrasting colours.",
+}
+
+
+def build_depth_system_prompt(cat: str, prof: Dict[str, Any]) -> str:
+    lo, hi = prof["d3_parts"]
+    pmin, pmax = prof["d3_pts"]
+    return (DEPTH_SKILL.replace("@LO@", str(lo)).replace("@HI@", str(hi))
+            .replace("@PMIN@", str(pmin)).replace("@PMAX@", str(pmax)) + "\n" + DEPTH_HINTS.get(cat, DEPTH_HINTS["prop"]))
+
+
+def hulls_to_rows(hulls: List[Dict[str, Any]]) -> List[List[Any]]:
+    """Workspace parts (local points + pos + scale) -> compact rows in MODEL space for the AI."""
+    rows = []
+    for h in hulls:
+        try:
+            pos = h.get("pos") or [0, 0, 0]
+            sc = h.get("scale") or [1, 1, 1]
+            pts = [[round(pos[0] + sc[0] * p[0], 2), round(pos[1] + sc[1] * p[1], 2), round(pos[2] + sc[2] * p[2], 2)]
+                   for p in (h.get("points") or [])]
+            if len(pts) >= 4:
+                rows.append([str(h.get("id") or "Part"), _hex6(h.get("color")), pts, 0])
+        except (TypeError, ValueError, IndexError):
+            continue
+    return rows
+
+
+def build_depth_user_prompt(prompt: str, cat: str, prof: Dict[str, Any], web_ctx: str) -> str:
+    lo, hi = prof["d3_parts"]
+    out = [f'SUBJECT: "{prompt}"', f"CATEGORY: {cat}",
+           f"Sculpt it as low-poly convex volumes: about {lo}-{hi} parts, {prof['d3_pts'][0]}-{prof['d3_pts'][1]} points each.",
+           EFFORT_PROMPT[prof["name"]]]
+    if web_ctx:
+        out.append("LIVE WEB REFERENCE (use it for anatomy, colours and proportions; do not copy text): " + web_ctx)
+    return "\n".join(out)
+
+
+def build_depth_revision_prompt(prompt: str, cat: str, prof: Dict[str, Any], hulls: List[Dict[str, Any]],
+                                problems: List[str], change: str = "") -> str:
+    rows = hulls_to_rows(hulls)
+    out = [f'SUBJECT: "{prompt}"', f"CATEGORY: {cat}",
+           f"TARGET: {prof['d3_parts'][0]}-{prof['d3_parts'][1]} parts.",
+           'CURRENT MODEL - rows are [id, color, points in MODEL space, mirror=0]:',
+           json.dumps(rows, separators=(",", ":"))]
+    if change:
+        out.append(f'REQUESTED CHANGE: "{change}"\nApply it faithfully and keep everything else.')
+    if problems:
+        out.append("PROBLEMS FOUND BY THE CHECKER - fix all of them:\n" + "\n".join("- " + m for m in problems))
+    out.append(EFFORT_PROMPT[prof["name"]])
+    out.append("Return the COMPLETE corrected model in the same JSON schema (plan + every part row), never a diff. "
+               "You may now write both sides of symmetric parts or use the mirror flag.")
+    return "\n".join(out)
+
+
+def process_hulls(data: Dict[str, Any], prof: Dict[str, Any], lo: int, hi: int) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    rows = data.get("parts") or data.get("hulls") or data.get("ops") or []
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("The AI answer contained no parts.")
+    raw: List[List[Any]] = []
+    dropped: List[str] = []
+    for k, row in enumerate(rows[:400]):
+        if isinstance(row, (list, tuple)) and len(row) >= 3:
+            pid, col, pts, mir = row[0], row[1], row[2], (row[3] if len(row) > 3 else 0)
+        elif isinstance(row, dict):
+            pid, col = row.get("id") or row.get("name"), row.get("color") or row.get("c")
+            pts, mir = row.get("points") or row.get("p"), row.get("mirror") or row.get("m") or 0
+            pos, sc = row.get("pos"), row.get("scale")
+            if isinstance(pos, (list, tuple)) and len(pos) == 3 and isinstance(pts, (list, tuple)):
+                sc = sc if isinstance(sc, (list, tuple)) and len(sc) == 3 else (1, 1, 1)
+                try:
+                    pts = [[pos[0] + sc[0] * p[0], pos[1] + sc[1] * p[1], pos[2] + sc[2] * p[2]] for p in pts]
+                except (TypeError, IndexError):
+                    pts = []
+        else:
+            continue
+        pid = re.sub(r"[^A-Za-z0-9_\-]", "_", str(pid or f"Part_{k + 1}"))[:40] or f"Part_{k + 1}"
+        clean = _clean_points(pts)
+        if len(clean) < 4:
+            dropped.append(pid)
+            continue
+        raw.append([pid, _hex6(col), clean, mir in (1, True, "1", "true", "yes")])
+
+    # mirrored twins (left/right) written by the server, so the AI only pays for one side
+    expanded: List[List[Any]] = []
+    for pid, col, pts, mir in raw:
+        expanded.append([pid, col, pts])
+        if mir:
+            cx = sum(p[0] for p in pts) / len(pts)
+            if abs(cx) > 0.04:
+                expanded.append([_mirror_id(pid), col, [(-x, y, z) for (x, y, z) in pts]])
+    ids: Dict[str, int] = {}
+    for e in expanded:
+        n = ids.get(e[0], 0) + 1
+        ids[e[0]] = n
+        if n > 1:
+            e[0] = f"{e[0]}_{n}"
+    expanded = expanded[: hi * 2 + 12]
+    if not expanded:
+        raise ValueError("The AI answer contained no usable parts.")
+
+    allp = [p for e in expanded for p in e[2]]
+    mn = [min(p[k] for p in allp) for k in range(3)]
+    mx = [max(p[k] for p in allp) for k in range(3)]
+    k = 5.2 / (max(mx[i] - mn[i] for i in range(3)) or 1.0)
+    cx, cz = (mn[0] + mx[0]) / 2, (mn[2] + mx[2]) / 2
+
+    hulls: List[Dict[str, Any]] = []
+    boxes = tris = 0
+    for pid, col, pts in expanded:
+        wp = [((x - cx) * k, (y - mn[1]) * k, (z - cz) * k) for (x, y, z) in pts]
+        faces = convex_hull_3d(wp)
+        if not faces or hull_volume(wp, faces) < 2e-4:
+            dropped.append(pid)
+            continue
+        vs = sorted({i for f in faces for i in f})
+        wp = [wp[i] for i in vs]
+        c = tuple(sum(p[j] for p in wp) / len(wp) for j in range(3))
+        local = [[round(p[0] - c[0], 3), round(p[1] - c[1], 3), round(p[2] - c[2], 3)] for p in wp]
+        bb = [max(p[j] for p in wp) - min(p[j] for p in wp) for j in range(3)]
+        if len(wp) == 8 and bb[0] * bb[1] * bb[2] > 0 and hull_volume(wp, faces) / (bb[0] * bb[1] * bb[2]) > 0.96:
+            boxes += 1
+        tris += len(faces)
+        hulls.append({"id": pid, "color": col, "pos": [round(c[0], 3), round(c[1], 3), round(c[2], 3)],
+                      "scale": [1, 1, 1], "points": local})
+    if not hulls:
+        raise ValueError("None of the AI's parts had a valid volume.")
+
+    n = len(hulls)
+    issues: List[Dict[str, Any]] = []
+
+    def add(msg: str, blocking: bool = False) -> None:
+        issues.append({"msg": msg, "blocking": blocking})
+
+    if n < max(4, int(lo * 0.5)):
+        add(f"Only {n} parts - the target is {lo}-{hi}. Add the missing anatomy and details.", True)
+    elif n < lo * 0.8:
+        add(f"{n} parts is a little light (target {lo}-{hi}). Add secondary details.")
+    if dropped:
+        add(f"{len(dropped)} part(s) had no volume (flat, collinear or too few points): {', '.join(dropped[:6])}. Give them real thickness.",
+            len(dropped) > max(2, n * 0.12))
+
+    boxes_w = []
+    for h in hulls:
+        xs = [h["pos"][0] + p[0] for p in h["points"]]
+        ys = [h["pos"][1] + p[1] for p in h["points"]]
+        zs = [h["pos"][2] + p[2] for p in h["points"]]
+        boxes_w.append((min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)))
+    parent = list(range(n))
+
+    def find(a: int) -> int:
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    tol = 0.05
+    for i in range(n):
+        a = boxes_w[i]
+        for j in range(i + 1, n):
+            b = boxes_w[j]
+            if a[0] - tol <= b[1] and b[0] - tol <= a[1] and a[2] - tol <= b[3] and b[2] - tol <= a[3] and a[4] - tol <= b[5] and b[4] - tol <= a[5]:
+                parent[find(i)] = find(j)
+    groups: Dict[int, List[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    floating: List[str] = []
+    if len(groups) > 1:
+        main = max(groups.values(), key=len)
+        floating = [hulls[i]["id"] for g in groups.values() if g is not main for i in g]
+        add(f"{len(floating)} part(s) float disconnected from the body: {', '.join(floating[:6])}. Make them overlap their neighbour by 0.05-0.15.", True)
+    if n >= 12 and len({h["color"] for h in hulls}) < 3:
+        add("Use at least 3 colours (base, secondary, accent) so the model reads clearly.")
+    if n >= 10 and boxes / n > 0.5:
+        add(f"{boxes} of {n} parts are plain cubes. Taper, lean or bevel them so the silhouette has depth.")
+    avg_pts = sum(len(h["points"]) for h in hulls) / n
+    if avg_pts < prof["d3_pts"][0] - 1:
+        add(f"Parts are too simple (about {avg_pts:.1f} points each; aim for {prof['d3_pts'][0]}-{prof['d3_pts'][1]}).")
+    if tris > prof["d3_tris"] * 1.6:
+        add(f"{tris} triangles is heavy for this effort level (budget about {prof['d3_tris']}). Simplify small details.")
+
+    nb = sum(1 for i in issues if i["blocking"])
+    score = max(0, min(100, 100 - 12 * nb - 4 * (len(issues) - nb)))
+    grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D"
+    size = [round(max(b[1] for b in boxes_w) - min(b[0] for b in boxes_w), 2),
+            round(max(b[3] for b in boxes_w), 2),
+            round(max(b[5] for b in boxes_w) - min(b[4] for b in boxes_w), 2)]
+    analysis = {
+        "issues": issues, "score": score, "grade": grade,
+        "stats": {"parts": n, "tris": tris, "size": size, "avg_points": round(avg_pts, 1), "cubes": boxes},
+        "diag": {
+            "readout": f"{n} parts · {tris} triangles · {size[0]} × {size[1]} × {size[2]} units",
+            "floating_check": "All parts are connected" if not floating else f"{len(floating)} part(s) float: {', '.join(floating[:4])}",
+            "detail_check": f"{avg_pts:.1f} points per part · {boxes} plain cube{'s' if boxes != 1 else ''}",
+        },
+    }
+    return hulls, analysis
+
+
+def depth_payload(prompt: str, cat: str, data: Dict[str, Any], hulls: List[Dict[str, Any]], analysis: Dict[str, Any],
+                  engine: Dict[str, str], revisions: int, used_serper: bool) -> Dict[str, Any]:
+    diag = dict(analysis["diag"])
+    diag["quality"] = (f"Grade {analysis['grade']} ({analysis['score']}/100)"
+                       + (f" after {revisions} automatic revision{'s' if revisions != 1 else ''}" if revisions else ""))
+    return {
+        "variant": "depth3d", "title": str(data.get("title") or prompt.title())[:60], "category": cat,
+        "hulls": hulls, "stats": analysis["stats"], "diagnostics": diag,
+        "quality": {"score": analysis["score"], "grade": analysis["grade"], "revisions": revisions,
+                    "issues_left": [i["msg"] for i in analysis["issues"]]},
+        "plan": data.get("plan") if isinstance(data.get("plan"), dict) else None,
+        "engine": engine, "used_serper": used_serper,
+    }
+
+
+# --------------------------------------------------------------------------- shared pipeline pieces
+async def _ask_candidates(system: str, user: str, req: GenerateRequest, prof: Dict[str, Any], progress: Progress):
+    """One AI call, or (extra effort) two independent candidates in parallel; the better one is kept later."""
+    n = max(1, int(prof.get("best_of", 1)))
+    if n == 1:
+        return [await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")]
+    progress(f"{prof['label']} effort: building {n} independent candidates and keeping the better one...")
+
+    async def one(temp: float):
+        _TEMP.set(temp)
+        return await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")
+
+    tasks = [asyncio.create_task(one(t)) for t in (0.25, 0.7, 0.45)[:n]]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    ok = [r for r in results if not isinstance(r, BaseException)]
+    if not ok:
+        raise results[0]
+    return ok
+
+
+def _rounds(req: GenerateRequest, prof: Dict[str, Any]) -> int:
     do_revise = AUTO_REVISE if req.revise is None else req.revise
-    rounds = MAX_REVISIONS if req.max_revisions is None else max(0, min(2, req.max_revisions))
-    for _ in range(rounds if do_revise else 0):
+    cap = 9 if req.max_revisions is None else max(0, min(3, req.max_revisions))
+    return min(prof["revisions"], cap) if do_revise else 0
+
+
+async def _revision_loop(system: str, prompt: str, cat: str, sub: str, lo: int, hi: int, data: Dict[str, Any],
+                         parts, analysis, req: GenerateRequest, started: float, progress: Progress,
+                         prof: Dict[str, Any]):
+    revisions = 0
+    for _ in range(_rounds(req, prof)):
         blocking = [i["msg"] for i in analysis["issues"] if i["blocking"]]
         if not blocking:
             break
-        elapsed = time.monotonic() - started
-        if elapsed > REVISE_BUDGET_S * (revisions + 1) / (revisions + 2):
+        if time.monotonic() - started > prof["job_s"] * 0.5 * (revisions + 1) / (revisions + 2):
             break
         progress(f"Checker found {len(blocking)} problem(s) - asking the AI to fix them...")
         try:
@@ -2031,15 +2532,17 @@ async def _revision_loop(system: str, prompt: str, cat: str, sub: str, lo: int, 
     return data, parts, analysis, revisions
 
 
-async def _build_new(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
-                     dropped: List[str], progress: Progress) -> Tuple[Dict[str, Any], int]:
-    """One real AI build. With `base` the AI starts from a saved model and rebuilds it differently."""
+async def _build_classic(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
+                         dropped: List[str], progress: Progress, prof: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    """One real AI build of the classic Roblox-brick model. With `base` the AI re-sculpts a saved model."""
     cat, sub, wings, matched = classify(prompt, req.category or "")
     lo, hi = part_range(cat, req.target_parts)
+    if not req.target_parts:
+        lo, hi = effort_range(lo, hi, prof)
     web_ctx = clean_web_context(req.web_context or "")
-    if not web_ctx and req.use_serper:
+    if not web_ctx and req.use_serper and prof["research"] > 0:
         progress("Researching the subject on the web...")
-        web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "")
+        web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "", prof["research"])
     system = build_system_prompt(cat, sub, wings, lo, hi)
     started = time.monotonic()
 
@@ -2057,102 +2560,215 @@ async def _build_new(req: GenerateRequest, prompt: str, base: Optional[Dict[str,
         progress(f'Re-sculpting the saved "{base["prompt"]}" model with: {", ".join(added) or "your changes"}...')
     else:
         user = build_user_prompt(prompt, cat, sub, lo, hi, web_ctx)
-        progress("Sculpting a brand-new 3D model...")
+        progress(f"Sculpting a brand-new 3D model ({prof['label']} effort)...")
+    user += "\n\n" + EFFORT_PROMPT[prof["name"]]
 
-    data, engine = await ask_and_parse(system, user, req.provider or "", req.model or "", req.api_key or "")
-    if not matched and not (req.category or "") and str(data.get("category", "")).lower() in PART_RANGE:
-        cat = str(data["category"]).lower()
+    cands = await _ask_candidates(system, user, req, prof, progress)
+    first = cands[0][0]
+    if not matched and not (req.category or "") and str(first.get("category", "")).lower() in PART_RANGE:
+        cat = str(first["category"]).lower()
         lo, hi = part_range(cat, req.target_parts)
-    try:
-        parts, analysis = await asyncio.to_thread(process_build, data, cat, sub, lo, hi, prompt)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        if not req.target_parts:
+            lo, hi = effort_range(lo, hi, prof)
+    best = None
+    for data, engine in cands:
+        try:
+            parts, analysis = await asyncio.to_thread(process_build, data, cat, sub, lo, hi, prompt)
+        except ValueError:
+            continue
+        if best is None or better(analysis, best[3]):
+            best = (data, engine, parts, analysis)
+    if best is None:
+        raise HTTPException(status_code=422, detail="The AI returned no usable parts.")
+    data, engine, parts, analysis = best
+    if len(cands) > 1:
+        progress(f"Kept the better of {len(cands)} candidates (score {analysis['score']}).", "ok")
     data, parts, analysis, revisions = await _revision_loop(system, prompt, cat, sub, lo, hi, data, parts, analysis,
-                                                            req, started, progress)
+                                                            req, started, progress, prof)
     payload = response_payload(prompt.title(), cat, data, parts, analysis, False, engine, revisions, bool(web_ctx))
     return payload, analysis["score"]
+
+
+async def _build_depth(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
+                       dropped: List[str], progress: Progress, prof: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    """One real AI build of a Depth 3D (low-poly hull) model."""
+    cat = classify(prompt, req.category or "")[0]
+    lo, hi = prof["d3_parts"]
+    web_ctx = clean_web_context(req.web_context or "")
+    if not web_ctx and req.use_serper and prof["research"] > 0:
+        progress("Researching the subject on the web...")
+        web_ctx = await fetch_anatomical_research(prompt, req.serper_key or "", prof["research"])
+    system = build_depth_system_prompt(cat, prof)
+    started = time.monotonic()
+    if base is not None:
+        change = (f'Build "{prompt}" as a NEW, noticeably different take on the saved model "{base["prompt"]}". '
+                  f'Keep the same identity but re-sculpt it in a fresh way (different shapes, proportions and detail). '
+                  + (f'Apply these new traits: {", ".join(added)}. ' if added else "")
+                  + (f'Drop these traits from the old model: {", ".join(dropped)}.' if dropped else ""))
+        user = build_depth_revision_prompt(prompt, cat, prof, base["payload"].get("hulls") or [], [], change)
+        progress(f'Re-sculpting the saved "{base["prompt"]}" model with: {", ".join(added) or "your changes"}...')
+    else:
+        user = build_depth_user_prompt(prompt, cat, prof, web_ctx)
+        progress(f"Sculpting low-poly volumes ({prof['label']} effort)...")
+
+    cands = await _ask_candidates(system, user, req, prof, progress)
+    best = None
+    for data, engine in cands:
+        try:
+            hulls, analysis = await asyncio.to_thread(process_hulls, data, prof, lo, hi)
+        except ValueError:
+            continue
+        if best is None or better(analysis, best[3]):
+            best = (data, engine, hulls, analysis)
+    if best is None:
+        raise HTTPException(status_code=422, detail="The AI returned no usable 3D parts.")
+    data, engine, hulls, analysis = best
+    if len(cands) > 1:
+        progress(f"Kept the better of {len(cands)} candidates (score {analysis['score']}).", "ok")
+
+    revisions = 0
+    for _ in range(_rounds(req, prof)):
+        blocking = [i["msg"] for i in analysis["issues"] if i["blocking"]]
+        if not blocking:
+            break
+        if time.monotonic() - started > prof["job_s"] * 0.5 * (revisions + 1) / (revisions + 2):
+            break
+        progress(f"Checker found {len(blocking)} problem(s) - asking the AI to fix them...")
+        try:
+            d2, _e = await ask_and_parse(system, build_depth_revision_prompt(prompt, cat, prof, hulls, blocking),
+                                         req.provider or "", req.model or "", req.api_key or "", retries=0)
+            h2, a2 = await asyncio.to_thread(process_hulls, d2, prof, lo, hi)
+        except (HTTPException, ValueError):
+            break
+        revisions += 1
+        if better(a2, analysis):
+            data, hulls, analysis = d2, h2, a2
+    return depth_payload(prompt, cat, data, hulls, analysis, engine, revisions, bool(web_ctx)), analysis["score"]
+
+
+async def _build_new(req: GenerateRequest, prompt: str, base: Optional[Dict[str, Any]], added: List[str],
+                     dropped: List[str], progress: Progress, variant: str = "classic",
+                     prof: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], int]:
+    prof = prof or EFFORTS["mid"]
+    if variant == "depth3d":
+        return await _build_depth(req, prompt, base, added, dropped, progress, prof)
+    return await _build_classic(req, prompt, base, added, dropped, progress, prof)
 
 
 async def run_generate(req: GenerateRequest, progress: Progress = _noop) -> Dict[str, Any]:
     prompt = req.prompt.strip()[:1000]
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required.")
+    variant, effort = norm_variant(req.variant), norm_effort(req.effort)
+    prof, rank = EFFORTS[effort], EFFORT_RANK[effort]
+    _EFFORT.set(prof)
     tokens = prompt_tokens(prompt)
-    key = prompt_key(tokens)
+    key = prompt_key(tokens, variant)
 
     mode, entry, added, dropped = ("none", None, [], [])
     if req.use_memory and not req.fresh and tokens:
-        mode, entry, added, dropped = MEMORY.find(tokens)
+        mode, entry, added, dropped = MEMORY.find(tokens, variant)
+    if mode == "exact" and entry and entry["rank"] < rank:
+        progress(f"A {entry['effort']}-effort model is saved - rebuilding at {effort} effort to improve it...")
+        mode, entry = "none", None
 
-    # 1) somebody already built this exact prompt -> serve it, no AI call at all
+    # 1) somebody already built this exact prompt (at this effort or higher) -> serve it, no AI call at all
     if mode == "exact" and entry:
         saved = MEMORY.get(entry["id"])
         if saved:
             uses = MEMORY.touch(entry["id"])
             progress("Found in the global memory - no AI call needed.", "ok")
-            out = dict(saved["payload"])
-            out["ops"] = apply_tonal(out["ops"], req.tonal_variation)
+            out = apply_tonal_payload(saved["payload"], req.tonal_variation)
             out["engine"] = {"provider": "global-memory", "model": entry["id"]}
             out["used_serper"] = False
-            out["memory"] = memory_info("memory", id=entry["id"], uses=uses, base_prompt=saved["prompt"], saved=False)
+            out["effort"] = saved["effort"]
+            out["memory"] = memory_info("memory", id=entry["id"], uses=uses, base_prompt=saved["prompt"], saved=False,
+                                        effort=saved["effort"])
             return out
 
-    # 2) the same prompt is already being built by someone else right now -> wait for that result
-    if req.use_memory and not req.fresh and key in _INFLIGHT:
+    # 2) the same prompt is being built by someone else right now -> wait for that result
+    fkey = f"{key}|{effort}"
+    if req.use_memory and not req.fresh and fkey in _INFLIGHT:
         progress("Someone else is building this right now - waiting for their result...")
         try:
-            shared = await asyncio.wait_for(asyncio.shield(_INFLIGHT[key]), timeout=170)
-            out = dict(shared)
-            out["ops"] = apply_tonal(out["ops"], req.tonal_variation)
+            shared = await asyncio.wait_for(asyncio.shield(_INFLIGHT[fkey]), timeout=prof["job_s"] - 10)
+            out = apply_tonal_payload(shared, req.tonal_variation)
             out["memory"] = {**(out.get("memory") or {}), "source": "memory", "saved": False}
             return out
         except Exception:
             pass
 
     fut: Optional["asyncio.Future[Dict[str, Any]]"] = None
-    if tokens and key not in _INFLIGHT:
+    if tokens and fkey not in _INFLIGHT:
         fut = asyncio.get_running_loop().create_future()
-        _INFLIGHT[key] = fut
+        _INFLIGHT[fkey] = fut
     try:
         base = MEMORY.get(entry["id"]) if (mode == "variant" and entry) else None
         if mode == "variant" and not base:
             mode = "none"
         if base:
             MEMORY.touch(base["id"])
-        payload, score = await _build_new(req, prompt, base, added, dropped, progress)
+        t0 = time.monotonic()
+        payload, score = await _build_new(req, prompt, base, added, dropped, progress, variant, prof)
+        payload["effort"] = effort
+        payload["build_seconds"] = round(time.monotonic() - t0, 1)
 
         saved_id = ""
         if req.publish and req.use_memory and tokens and score >= MEMORY_MIN_SCORE:
             saved_id = MEMORY.save(prompt, tokens, payload.get("category", ""), payload, score,
                                    parent_id=base["id"] if base else "",
-                                   engine=f"{payload['engine'].get('provider', '')}:{payload['engine'].get('model', '')}")
+                                   engine=f"{payload['engine'].get('provider', '')}:{payload['engine'].get('model', '')}",
+                                   effort=effort, variant=variant)
             if saved_id:
                 progress("Published to the global memory.", "ok")
         payload["memory"] = memory_info("variant" if base else "fresh", id=saved_id, saved=bool(saved_id),
                                         base_prompt=base["prompt"] if base else "", added=added, dropped=dropped,
-                                        uses=0)
+                                        uses=0, effort=effort)
         if fut and not fut.done():
             fut.set_result(dict(payload))
-        out = dict(payload)
-        out["ops"] = apply_tonal(out["ops"], req.tonal_variation)
-        return out
+        return apply_tonal_payload(payload, req.tonal_variation)
     except BaseException as e:
         if fut and not fut.done():
             fut.set_exception(e if isinstance(e, Exception) else RuntimeError("cancelled"))
             fut.exception()  # mark retrieved so asyncio does not log it
         raise
     finally:
-        if fut is not None and _INFLIGHT.get(key) is fut:
-            _INFLIGHT.pop(key, None)
+        if fut is not None and _INFLIGHT.get(fkey) is fut:
+            _INFLIGHT.pop(fkey, None)
 
 
 async def run_revise(req: ReviseRequest, progress: Progress = _noop) -> Dict[str, Any]:
     change = req.instruction.strip()[:1000]
-    if not change or not req.ops:
-        raise HTTPException(status_code=400, detail="instruction and ops are required.")
+    variant, effort = norm_variant(req.variant), norm_effort(req.effort)
+    prof = EFFORTS[effort]
+    _EFFORT.set(prof)
     prompt = (req.prompt or "the current model").strip()[:1000]
+    if not change:
+        raise HTTPException(status_code=400, detail="instruction is required.")
+
+    if variant == "depth3d":
+        cur = [h for h in (req.hulls or []) if isinstance(h, dict)]
+        if not hulls_to_rows(cur):
+            raise HTTPException(status_code=400, detail="hulls (the current Depth 3D model) are required.")
+        cat = classify(f"{prompt} {change}", req.category or "")[0]
+        lo, hi = prof["d3_parts"]
+        system = build_depth_system_prompt(cat, prof)
+        progress("Applying your change...")
+        data, engine = await ask_and_parse(system, build_depth_revision_prompt(prompt, cat, prof, cur, [], change),
+                                           req.provider or "", req.model or "", req.api_key or "")
+        try:
+            hulls, analysis = await asyncio.to_thread(process_hulls, data, prof, max(4, min(lo, len(cur))), max(hi, len(cur) * 2))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        out = depth_payload(prompt, cat, data, hulls, analysis, engine, 1, False)
+        out["effort"] = effort
+        return apply_tonal_payload(out, req.tonal_variation)
+
+    if not req.ops:
+        raise HTTPException(status_code=400, detail="ops are required.")
     cat, sub, wings, _ = classify(f"{prompt} {change}", req.category or "")
     lo, hi = part_range(cat, None)
+    lo, hi = effort_range(lo, hi, prof)
     unit = 1.0 / (req.scene_scale if req.scene_scale and req.scene_scale > 0 else STUD)
     current = normalize_ops(req.ops, unit, "#141c28", cat, sub)
     if len(current) < 3:
@@ -2166,7 +2782,9 @@ async def run_revise(req: ReviseRequest, progress: Progress = _noop) -> Dict[str
         parts, analysis = await asyncio.to_thread(process_build, data, cat, sub, lo, hi, prompt)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 1, False)
+    out = response_payload(prompt.title(), cat, data, parts, analysis, req.tonal_variation, engine, 1, False)
+    out["effort"] = effort
+    return out
 
 
 # --------------------------------------------------------------------------- background jobs (no more proxy time-outs)
@@ -2189,8 +2807,9 @@ def _gc_jobs() -> None:
         JOBS.pop(jid, None)
 
 
-def start_job(kind: str, coro_factory) -> str:
+def start_job(kind: str, coro_factory, max_s: Optional[float] = None) -> str:
     _gc_jobs()
+    cap = max_s or JOB_MAX_S
     jid = uuid.uuid4().hex[:16]
     job = {"id": jid, "kind": kind, "status": "queued", "steps": [], "result": None, "error": None,
            "created": time.time(), "updated": time.time()}
@@ -2209,12 +2828,12 @@ def start_job(kind: str, coro_factory) -> str:
             async with job_slots():
                 job["status"] = "running"
                 job["updated"] = time.time()
-                job["result"] = await asyncio.wait_for(coro_factory(progress), timeout=JOB_MAX_S)
+                job["result"] = await asyncio.wait_for(coro_factory(progress), timeout=cap)
                 job["status"] = "done"
                 log.info("job %s (%s) done in %.1fs", jid, kind, time.time() - job["created"])
         except asyncio.TimeoutError:
-            log.warning("job %s (%s) hit the %ss cap", jid, kind, JOB_MAX_S)
-            job["status"], job["error"] = "error", {"status": 504, "detail": f"The AI took longer than {int(JOB_MAX_S)}s. Pick a faster model (Gemini Flash-Lite) and try again."}
+            log.warning("job %s (%s) hit the %ss cap", jid, kind, cap)
+            job["status"], job["error"] = "error", {"status": 504, "detail": f"The AI took longer than {int(cap)}s. Lower the AI effort or pick a faster model (Gemini Flash-Lite) and try again."}
         except HTTPException as e:
             log.warning("job %s failed: %s %s", jid, e.status_code, e.detail)
             job["status"], job["error"] = "error", {"status": e.status_code, "detail": str(e.detail)}
@@ -2233,12 +2852,12 @@ def start_job(kind: str, coro_factory) -> str:
 async def job_generate(req: GenerateRequest):
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required.")
-    return {"job_id": start_job("generate", lambda p: run_generate(req, p))}
+    return {"job_id": start_job("generate", lambda p: run_generate(req, p), EFFORTS[norm_effort(req.effort)]["job_s"])}
 
 
 @app.post("/jobs/revise")
 async def job_revise(req: ReviseRequest):
-    return {"job_id": start_job("revise", lambda p: run_revise(req, p))}
+    return {"job_id": start_job("revise", lambda p: run_revise(req, p), EFFORTS[norm_effort(req.effort)]["job_s"])}
 
 
 @app.get("/jobs/{job_id}")
@@ -2275,8 +2894,9 @@ async def revise(req: ReviseRequest):
 
 # --------------------------------------------------------------------------- memory API
 @app.get("/memory")
-async def memory_list(q: str = "", sort: str = "popular", limit: int = 40):
-    return {"total": MEMORY.count(), "items": MEMORY.listing(q, limit, sort), "persistent": MEMORY.persistent}
+async def memory_list(q: str = "", sort: str = "popular", limit: int = 40, variant: str = ""):
+    v = norm_variant(variant) if variant else ""
+    return {"total": MEMORY.count(), "items": MEMORY.listing(q, limit, sort, v), "persistent": MEMORY.persistent}
 
 
 @app.get("/memory/{mid}")
@@ -2285,10 +2905,10 @@ async def memory_get(mid: str, tonal: bool = True):
     if not e:
         raise HTTPException(status_code=404, detail="Model not found in global memory.")
     uses = MEMORY.touch(mid)
-    out = dict(e["payload"])
-    out["ops"] = apply_tonal(out["ops"], tonal)
+    out = apply_tonal_payload(e["payload"], tonal)
     out["engine"] = {"provider": "global-memory", "model": mid}
-    out["memory"] = memory_info("memory", id=mid, uses=uses, base_prompt=e["prompt"], saved=False)
+    out["effort"] = e["effort"]
+    out["memory"] = memory_info("memory", id=mid, uses=uses, base_prompt=e["prompt"], saved=False, effort=e["effort"])
     return JSONResponse(content=out)
 
 
@@ -2309,10 +2929,23 @@ async def memory_delete(mid: str, token: str = ""):
 
 
 @app.get("/skill")
-async def skill(prompt: str = "", category: str = ""):
+async def skill(prompt: str = "", category: str = "", variant: str = "classic", effort: str = "mid"):
+    v, prof = norm_variant(variant), EFFORTS[norm_effort(effort)]
+    if v == "depth3d":
+        cat = classify(prompt, category)[0]
+        return {"variant": v, "effort": prof["name"], "category": cat, "parts": list(prof["d3_parts"]),
+                "points_per_part": list(prof["d3_pts"]), "system_prompt": build_depth_system_prompt(cat, prof)}
     cat, sub, wings, _ = classify(prompt, category)
-    lo, hi = part_range(cat, None)
-    return {"category": cat, "sub": sub, "wings": wings, "parts": [lo, hi], "system_prompt": build_system_prompt(cat, sub, wings, lo, hi)}
+    lo, hi = effort_range(*part_range(cat, None), prof)
+    return {"variant": v, "effort": prof["name"], "category": cat, "sub": sub, "wings": wings, "parts": [lo, hi],
+            "system_prompt": build_system_prompt(cat, sub, wings, lo, hi)}
+
+
+@app.get("/efforts")
+async def efforts():
+    return {k: {"label": v["label"], "note": v["note"], "thinking_tokens": v["thinking"], "revisions": v["revisions"],
+                "research_queries": {0: 0, 1: 3, 2: 5, 3: 6}[v["research"]], "best_of": v["best_of"],
+                "depth3d_parts": list(v["d3_parts"]), "time_limit_s": v["job_s"]} for k, v in EFFORTS.items()}
 
 
 @app.post("/test-key")
@@ -2368,8 +3001,8 @@ async def test_key(req: TestKeyRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "v21", "providers": [k for k, v in ENV_KEYS.items() if v],
-            "auto_revise": AUTO_REVISE, "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL,
+    return {"status": "healthy", "version": "v22", "providers": [k for k, v in ENV_KEYS.items() if v],
+            "auto_revise": AUTO_REVISE, "efforts": list(EFFORTS), "variants": ["classic", "depth3d"], "max_revisions": MAX_REVISIONS, "thinking_level": THINKING_LEVEL,
             "memory": {"models": MEMORY.count(), "persistent": MEMORY.persistent, "path": str(MEMORY.path)},
             "jobs_active": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running"))}
 
@@ -2388,6 +3021,14 @@ async def serve_ui():
     if html_path:
         return FileResponse(html_path, media_type="text/html")
     return HTMLResponse("<h3>index.html not found - put the Verdant page next to server.py</h3>")
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+async def workspace():
+    p = Path(__file__).parent / "workspace.html"
+    if p.exists():
+        return FileResponse(p, media_type="text/html")
+    return HTMLResponse("<h3>workspace.html not found - put it next to server.py</h3>", status_code=404)
 
 
 if __name__ == "__main__":
