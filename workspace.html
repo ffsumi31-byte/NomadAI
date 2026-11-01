@@ -606,15 +606,10 @@ kbd { font: 600 11px ui-monospace, Menlo, monospace; border: 1px solid var(--lin
 #lb-grid canvas{display:block;width:100%;height:auto;background:#1a2230}
 #lb-grid figcaption{padding:6px 10px;font-size:12.5px;color:#4a6458}
 </style>
-<button id="lb-toggle" type="button">Steps &amp; photo</button>
+<button id="lb-toggle" type="button">Recipe steps</button>
 <div id="lb-panel" role="dialog" aria-label="Step builder">
-  <h3>Build step by step, or from a photo</h3>
+  <h3>Recipe builder: no AI, every step rendered</h3>
   <div class="lb-row"><input id="lb-prompt" type="text" placeholder="e.g. small red house with a door, tall tower, blue car, stairs"><button class="lb-go" id="lb-build" type="button">Build</button></div>
-  <div class="lb-row">
-    <label>Photo <input id="lb-photo" type="file" accept="image/*"></label>
-    <label>Blocks wide <input id="lb-width" type="number" min="4" max="64" value="32"></label>
-    <button id="lb-photo-go" type="button">Build from photo</button>
-  </div>
   <div class="lb-row">
     <button id="lb-good" type="button">Good result</button>
     <button id="lb-bad" type="button">Wrong result</button>
@@ -706,30 +701,6 @@ kbd { font: 600 11px ui-monospace, Menlo, monospace; border: 1px solid var(--lin
     var p = $('lb-prompt').value.trim();
     if (!p) { msg('Type what to build first.', 'lb-bad'); return; }
     run({ prompt: p });
-  };
-
-  // Photo: decode in the browser, shrink to a block grid, send hex colours (no image libraries on the server)
-  $('lb-photo-go').onclick = function () {
-    var f = $('lb-photo').files[0];
-    if (!f) { msg('Choose a photo first.', 'lb-bad'); return; }
-    var w = Math.max(4, Math.min(64, parseInt($('lb-width').value, 10) || 32));
-    var img = new Image();
-    img.onload = function () {
-      var h = Math.max(4, Math.min(64, Math.round(w * img.height / img.width)));
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
-      var d = ctx.getImageData(0, 0, w, h).data, rows = [];
-      for (var y = 0; y < h; y++) {
-        var row = '';
-        for (var x = 0; x < w; x++) { var i = (y * w + x) * 4;
-          row += ((1 << 24) | (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]).toString(16).slice(1); }
-        rows.push(row);
-      }
-      run({ photo: { width: w, rows: rows } });
-      URL.revokeObjectURL(img.src);
-    };
-    img.onerror = function () { msg('Could not read that image.', 'lb-bad'); };
-    img.src = URL.createObjectURL(f);
   };
 
   $('lb-good').onclick = function () { rate(true); };
