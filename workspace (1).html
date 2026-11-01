@@ -589,4 +589,164 @@ kbd { font: 600 11px ui-monospace, Menlo, monospace; border: 1px solid var(--lin
 })();
 </script>
 
+<style id="lb-style">
+#lb-toggle{position:fixed;right:14px;bottom:14px;z-index:9999;background:#178a4c;color:#fff;border:0;border-radius:999px;padding:10px 16px;font:600 13px system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+#lb-panel{position:fixed;right:14px;bottom:60px;width:min(900px,calc(100vw - 28px));max-height:78vh;overflow:auto;z-index:9999;background:#fff;color:#0f2a20;border:1px solid #d5e8dc;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:16px;font:14px system-ui,sans-serif;display:none}
+#lb-panel.open{display:block}
+#lb-panel h3{margin:0 0 10px;font-size:16px}
+#lb-panel .lb-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+#lb-panel input[type=text]{flex:1;min-width:220px;padding:9px 10px;border:1px solid #d5e8dc;border-radius:8px;font:inherit}
+#lb-panel input[type=number]{width:70px;padding:8px;border:1px solid #d5e8dc;border-radius:8px;font:inherit}
+#lb-panel button{padding:8px 12px;border:1px solid #d5e8dc;border-radius:8px;background:#f4faf6;color:#0f2a20;font:600 13px system-ui,sans-serif;cursor:pointer}
+#lb-panel button.lb-go{background:#178a4c;color:#fff;border-color:#178a4c}
+#lb-panel .lb-msg{color:#4a6458;font-size:13px;white-space:pre-wrap;margin:6px 0}
+#lb-panel .lb-bad{color:#b3342f}#lb-panel .lb-ok{color:#178a4c}
+#lb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:10px}
+#lb-grid figure{margin:0;border:1px solid #d5e8dc;border-radius:10px;overflow:hidden;background:#f4faf6}
+#lb-grid canvas{display:block;width:100%;height:auto;background:#1a2230}
+#lb-grid figcaption{padding:6px 10px;font-size:12.5px;color:#4a6458}
+</style>
+<button id="lb-toggle" type="button">Steps &amp; photo</button>
+<div id="lb-panel" role="dialog" aria-label="Step builder">
+  <h3>Build step by step, or from a photo</h3>
+  <div class="lb-row"><input id="lb-prompt" type="text" placeholder="e.g. small red house with a door, tall tower, blue car, stairs"><button class="lb-go" id="lb-build" type="button">Build</button></div>
+  <div class="lb-row">
+    <label>Photo <input id="lb-photo" type="file" accept="image/*"></label>
+    <label>Blocks wide <input id="lb-width" type="number" min="4" max="64" value="32"></label>
+    <button id="lb-photo-go" type="button">Build from photo</button>
+  </div>
+  <div class="lb-row">
+    <button id="lb-good" type="button">Good result</button>
+    <button id="lb-bad" type="button">Wrong result</button>
+    <button id="lb-save" type="button">Save as taught recipe</button>
+  </div>
+  <div id="lb-msg" class="lb-msg"></div>
+  <div id="lb-grid"></div>
+</div>
+<script id="lb-script">
+(function () {
+  var current = null;
+  var $ = function (id) { return document.getElementById(id); };
+  var msg = function (t, cls) { $('lb-msg').className = 'lb-msg ' + (cls || ''); $('lb-msg').textContent = t; };
+
+  $('lb-toggle').onclick = function () { $('lb-panel').classList.toggle('open'); };
+
+  function post(path, body) {
+    return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.detail || 'Request failed'); return d; }); });
+  }
+
+  // ---- isometric projection, same camera as the server-side plan
+  var COS30 = Math.cos(Math.PI / 6);
+  function proj(x, y, z, s, ox, oy) { return [ox + (x - z) * COS30 * s, oy + ((x + z) * 0.5 - y) * s]; }
+  function shadeHex(hex, f) {
+    var n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    var c = function (v) { return Math.max(0, Math.min(255, Math.round(v * f))); };
+    return 'rgb(' + c(r) + ',' + c(g) + ',' + c(b) + ')';
+  }
+  function bounds(parts) {
+    var lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    parts.forEach(function (p) { for (var k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], p.pos[k] - p.size[k] / 2); hi[k] = Math.max(hi[k], p.pos[k] + p.size[k] / 2); } });
+    if (!parts.length) return [[-1, 0, -1], [1, 1, 1]];
+    return [lo, hi];
+  }
+  function drawStep(canvas, parts, fb) {
+    var W = 520, H = 390; canvas.width = W; canvas.height = H;
+    var ctx = canvas.getContext('2d'); ctx.fillStyle = '#1a2230'; ctx.fillRect(0, 0, W, H);
+    var lo = fb[0], hi = fb[1], xs = [], ys = [];
+    [lo[0], hi[0]].forEach(function (x) { [lo[1], hi[1]].forEach(function (y) { [lo[2], hi[2]].forEach(function (z) {
+      var p = proj(x, y, z, 1, 0, 0); xs.push(p[0]); ys.push(p[1]); }); }); });
+    var minu = Math.min.apply(null, xs), maxu = Math.max.apply(null, xs), minv = Math.min.apply(null, ys), maxv = Math.max.apply(null, ys);
+    var span = Math.max(maxu - minu, maxv - minv, 1e-6), s = Math.min(W, H) * 0.78 / span;
+    var ox = W / 2 - (minu + maxu) / 2 * s, oy = H / 2 - (minv + maxv) / 2 * s;
+    parts.slice().sort(function (a, b) { return (a.pos[0] + a.pos[1] + a.pos[2]) - (b.pos[0] + b.pos[1] + b.pos[2]); })
+      .forEach(function (p) {
+        var x0 = p.pos[0] - p.size[0] / 2, x1 = p.pos[0] + p.size[0] / 2, y0 = p.pos[1] - p.size[1] / 2, y1 = p.pos[1] + p.size[1] / 2,
+            z0 = p.pos[2] - p.size[2] / 2, z1 = p.pos[2] + p.size[2] / 2, c = p.color;
+        var faces = [
+          [[[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]], shadeHex(c, 1.0)],
+          [[[x1,y0,z0],[x1,y1,z0],[x1,y1,z1],[x1,y0,z1]], shadeHex(c, 0.78)],
+          [[[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], shadeHex(c, 0.6)]];
+        faces.forEach(function (f) {
+          ctx.beginPath();
+          f[0].forEach(function (v, i) { var q = proj(v[0], v[1], v[2], s, ox, oy); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
+          ctx.closePath(); ctx.fillStyle = f[1]; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.stroke();
+        });
+      });
+  }
+
+  function renderSteps(job) {
+    var grid = $('lb-grid'); grid.innerHTML = '';
+    var acc = [];
+    var fb = bounds([].concat.apply([], job.steps.map(function (s) { return s.parts || []; })));
+    job.steps.forEach(function (s) {
+      acc = acc.concat(s.parts || []);
+      var fig = document.createElement('figure');
+      var cv = document.createElement('canvas'); drawStep(cv, acc, fb);
+      var cap = document.createElement('figcaption');
+      var c = s.check ? (s.check.ok ? ' · checks ok' : ' · ' + s.check.floating_count + ' floating, ' + s.check.overlaps + ' overlaps') : '';
+      cap.textContent = s.index + '. ' + s.name + ' (+' + s.new_parts + ', total ' + s.total_parts + ')' + c;
+      fig.appendChild(cv); fig.appendChild(cap); grid.appendChild(fig);
+    });
+  }
+
+  function run(body) {
+    msg('Building...');
+    $('lb-grid').innerHTML = '';
+    return post('/local/build', body).then(function (job) {
+      current = job;
+      if (job.status !== 'done') { msg((job.notes || []).join('\n'), 'lb-bad'); return; }
+      msg((job.log || []).join('\n') + '\n' + (job.check.ok ? 'Checks pass.' : 'Checks: ' + job.check.floating_count + ' floating, ' + job.check.overlaps + ' overlaps.'), 'lb-ok');
+      renderSteps(job);
+    }).catch(function (e) { msg(e.message, 'lb-bad'); });
+  }
+
+  $('lb-build').onclick = function () {
+    var p = $('lb-prompt').value.trim();
+    if (!p) { msg('Type what to build first.', 'lb-bad'); return; }
+    run({ prompt: p });
+  };
+
+  // Photo: decode in the browser, shrink to a block grid, send hex colours (no image libraries on the server)
+  $('lb-photo-go').onclick = function () {
+    var f = $('lb-photo').files[0];
+    if (!f) { msg('Choose a photo first.', 'lb-bad'); return; }
+    var w = Math.max(4, Math.min(64, parseInt($('lb-width').value, 10) || 32));
+    var img = new Image();
+    img.onload = function () {
+      var h = Math.max(4, Math.min(64, Math.round(w * img.height / img.width)));
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+      var d = ctx.getImageData(0, 0, w, h).data, rows = [];
+      for (var y = 0; y < h; y++) {
+        var row = '';
+        for (var x = 0; x < w; x++) { var i = (y * w + x) * 4;
+          row += ((1 << 24) | (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]).toString(16).slice(1); }
+        rows.push(row);
+      }
+      run({ photo: { width: w, rows: rows } });
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = function () { msg('Could not read that image.', 'lb-bad'); };
+    img.src = URL.createObjectURL(f);
+  };
+
+  $('lb-good').onclick = function () { rate(true); };
+  $('lb-bad').onclick = function () { rate(false); };
+  function rate(good) {
+    if (!current) { msg('Build something first.', 'lb-bad'); return; }
+    post('/teach/rate', { job_id: current.id, good: good })
+      .then(function (r) { msg(r.rated ? 'Saved. This taught recipe now has rating ' + r.rating + '.' : r.note, r.rated ? 'lb-ok' : ''); })
+      .catch(function (e) { msg(e.message, 'lb-bad'); });
+  }
+  $('lb-save').onclick = function () {
+    if (!current || current.status !== 'done') { msg('Build something first.', 'lb-bad'); return; }
+    post('/teach/save', { job_id: current.id })
+      .then(function (r) { msg('Saved as a taught recipe. Keywords: ' + r.keywords.join(', ') + '.', 'lb-ok'); })
+      .catch(function (e) { msg(e.message, 'lb-bad'); });
+  };
+})();
+</script>
+
 </body></html>
