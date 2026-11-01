@@ -457,6 +457,8 @@ html.boot .side,html.boot .nav button,html.boot .stag>*,html.boot h1 em::after,h
  <button type="button" data-var="classic" class="on"><b>Classic</b><span>Roblox brick sculpting</span></button>
  <button type="button" data-var="d3"><b>Depth 3D</b><span>Low-poly volumes · pro workspace</span></button>
 </div><textarea id="prompt" placeholder="For example: a giant gorilla with big muscular hands, a giant purple kraken squid, a fierce red fire dragon, or a sleek sports car"></textarea>
+<style>#photo-box{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 2px}#photo-box img{display:none;width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--ln)}#photo-box.has img{display:block}#photo-box .pn{font-size:12.5px;color:var(--mut);flex:1;min-width:180px}#photo-clear{display:none}#photo-box.has #photo-clear{display:inline-flex}</style>
+<div id="photo-box"><input id="photo-in" type="file" accept="image/*" hidden><button class="btn" id="photo-pick" type="button">Photo to model</button><img id="photo-thumb" alt="Your photo"><button class="btn" id="photo-clear" type="button">Remove</button><span class="pn">Optional. Gemini looks at the photo and builds that model with your normal AI settings. Anything you type above is used as a hint. Needs a Gemini key.</span></div>
 <div class="chips" id="chips"></div>
 <div class="eff" id="eff"><div class="eff-h"><span>AI effort</span><small id="eff-name">Mid</small></div>
  <div class="seg" id="eff-seg" role="radiogroup" aria-label="AI effort">
@@ -1155,7 +1157,7 @@ async function askServerGenerate(rawQuery,webContext,llm){
   tonal_variation:$('#tonal-var').checked,
   use_memory:true,
   publish:$('#publish-mem').checked,
-  effort,variant:'classic'
+  effort,variant:'classic',...photoFields()
  },{maxMs:EFFORT_INFO[effort].ms});
  if(res&&Array.isArray(res.ops)&&res.ops.length)return JSON.stringify(res);
  return null;
@@ -1183,6 +1185,7 @@ async function askBuiltInCloudAI(fullPrompt,rawQuery){
 }
 
 async function askAI(rawQuery,webContext){
+ if(PHOTO&&(location.protocol==='file:'||!serverHealth.online))throw{code:'api',msg:'Photo builds need the Verdant server. Open the site from your server URL.'};
  if(K.value.trim()&&!AI.on[AI.view]){
   await connect();
  }
@@ -1193,6 +1196,7 @@ async function askAI(rawQuery,webContext){
 
  const fullPrompt='Request: '+rawQuery+(webContext?'\n\nLive Serper Web Research Context (use this for accurate structure and colors): '+webContext:'');
  if(llm){
+  if(PHOTO)throw{code:'api',msg:'The server did not return a model for this photo. Check the server log on Render.'};
   return H[llm].ask(AI.key[llm],mod(llm),SYS0,fullPrompt);
  }
  return askBuiltInCloudAI(fullPrompt,rawQuery);
@@ -1316,7 +1320,7 @@ async function buildDepth(t){
   prompt:t,use_serper:$('#use-serper').checked,provider:llm||'',model:llm?mod(llm):'',api_key:llm?AI.key[llm]:'',
   serper_key:readySerper(),category:$('#cat-sel').value||'',revise:$('#auto-revise').checked,
   tonal_variation:$('#tonal-var').checked,use_memory:true,publish:$('#publish-mem').checked,
-  variant:'depth3d',effort
+  variant:'depth3d',effort,...photoFields()
  },{maxMs:EFFORT_INFO[effort].ms});
  if(!r||!Array.isArray(r.hulls)||!r.hulls.length)throw{code:'empty'};
  lastD3={prompt:t,category:r.category||''};
@@ -1341,16 +1345,36 @@ async function reviseDepth(instruction,llm){
  step('Revision complete: '+r.title,'ok');
 }
 
+let PHOTO=null;
+const PHOTO_PROMPT='a model of the uploaded photo';
+function photoFields(){return PHOTO?{image_b64:PHOTO.b64,image_mime:PHOTO.mime}:{}}
+function photoSet(file){
+ if(!file)return;
+ if(!/^image\//.test(file.type)){toast('That file is not an image');return}
+ const url=URL.createObjectURL(file),img=new Image();
+ img.onload=()=>{
+  const m=Math.min(1,1024/Math.max(img.width,img.height)),c=document.createElement('canvas');
+  c.width=Math.max(1,Math.round(img.width*m));c.height=Math.max(1,Math.round(img.height*m));
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);
+  const data=c.toDataURL('image/jpeg',0.85);
+  PHOTO={mime:'image/jpeg',b64:data.split(',')[1]};
+  $('#photo-thumb').src=data;$('#photo-box').classList.add('has');
+  URL.revokeObjectURL(url);toast('Photo added. Press Build with AI.');
+ };
+ img.onerror=()=>{URL.revokeObjectURL(url);toast('Could not read that image')};
+ img.src=url;
+}
+
 let busy=false;
 async function build(){
- const t=$('#prompt').value.trim();
- if(!t)return toast('Describe what you want to build first');
+ const t=$('#prompt').value.trim()||(PHOTO?PHOTO_PROMPT:'');
+ if(!t)return toast('Describe what you want to build, or add a photo');
  if(busy)return;
  busy=true;$('#build').disabled=true;$('#rev-btn').disabled=true;$('#build').textContent='Building…';$('#rc').classList.add('busy');$('#steps').innerHTML='';progSet(0,true);heat(1);
  if(K.value.trim()&&!AI.on[AI.view]){await connect()}
  try{
   if(variant=='d3'){await buildDepth(t)}else{
-  const webCtx=await fetchWebResearch(t);
+  const webCtx=PHOTO?'':await fetchWebResearch(t);
   const via=readyLLM();
   step('Sculpting 3D model with '+(via?PV[via].name+' ('+mod(via)+')':'Verdant v19 Cloud AI')+'…');
   const text=await askAI(t,webCtx);
@@ -1420,6 +1444,9 @@ async function reviseModel(){
 }
 
 $('#build').onclick=build;
+$('#photo-pick').onclick=()=>$('#photo-in').click();
+$('#photo-in').onchange=e=>{photoSet(e.target.files[0]);e.target.value=''};
+$('#photo-clear').onclick=()=>{PHOTO=null;$('#photo-box').classList.remove('has');$('#photo-thumb').removeAttribute('src')};
 $('#prompt').onkeydown=e=>{if(e.key=='Enter'&&(e.ctrlKey||e.metaKey))build()};
 $('#rev-btn').onclick=reviseModel;
 $('#rev-inp').onkeydown=e=>{if(e.key=='Enter')reviseModel()};
@@ -1725,6 +1752,8 @@ h1 em{background:linear-gradient(90deg,var(--g),#27c4d8 50%,var(--g)) 0 0/200% 1
  document.addEventListener('pointerleave',()=>{clr(cur,['--rx','--ry']);clr(mag,['--bx','--by'])});
 })();
 </script>
+
+
 <style id="lb-style">
 #lb-toggle{position:fixed;right:14px;bottom:14px;z-index:9999;background:#178a4c;color:#fff;border:0;border-radius:999px;padding:10px 16px;font:600 13px system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}
 #lb-panel{position:fixed;right:14px;bottom:60px;width:min(900px,calc(100vw - 28px));max-height:78vh;overflow:auto;z-index:9999;background:#fff;color:#0f2a20;border:1px solid #d5e8dc;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:16px;font:14px system-ui,sans-serif;display:none}
@@ -1742,15 +1771,10 @@ h1 em{background:linear-gradient(90deg,var(--g),#27c4d8 50%,var(--g)) 0 0/200% 1
 #lb-grid canvas{display:block;width:100%;height:auto;background:#1a2230}
 #lb-grid figcaption{padding:6px 10px;font-size:12.5px;color:#4a6458}
 </style>
-<button id="lb-toggle" type="button">Steps &amp; photo</button>
+<button id="lb-toggle" type="button">Recipe steps</button>
 <div id="lb-panel" role="dialog" aria-label="Step builder">
-  <h3>Build step by step, or from a photo</h3>
+  <h3>Recipe builder: no AI, every step rendered</h3>
   <div class="lb-row"><input id="lb-prompt" type="text" placeholder="e.g. small red house with a door, tall tower, blue car, stairs"><button class="lb-go" id="lb-build" type="button">Build</button></div>
-  <div class="lb-row">
-    <label>Photo <input id="lb-photo" type="file" accept="image/*"></label>
-    <label>Blocks wide <input id="lb-width" type="number" min="4" max="64" value="32"></label>
-    <button id="lb-photo-go" type="button">Build from photo</button>
-  </div>
   <div class="lb-row">
     <button id="lb-good" type="button">Good result</button>
     <button id="lb-bad" type="button">Wrong result</button>
@@ -1844,30 +1868,6 @@ h1 em{background:linear-gradient(90deg,var(--g),#27c4d8 50%,var(--g)) 0 0/200% 1
     run({ prompt: p });
   };
 
-  // Photo: decode in the browser, shrink to a block grid, send hex colours (no image libraries on the server)
-  $('lb-photo-go').onclick = function () {
-    var f = $('lb-photo').files[0];
-    if (!f) { msg('Choose a photo first.', 'lb-bad'); return; }
-    var w = Math.max(4, Math.min(64, parseInt($('lb-width').value, 10) || 32));
-    var img = new Image();
-    img.onload = function () {
-      var h = Math.max(4, Math.min(64, Math.round(w * img.height / img.width)));
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
-      var d = ctx.getImageData(0, 0, w, h).data, rows = [];
-      for (var y = 0; y < h; y++) {
-        var row = '';
-        for (var x = 0; x < w; x++) { var i = (y * w + x) * 4;
-          row += ((1 << 24) | (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]).toString(16).slice(1); }
-        rows.push(row);
-      }
-      run({ photo: { width: w, rows: rows } });
-      URL.revokeObjectURL(img.src);
-    };
-    img.onerror = function () { msg('Could not read that image.', 'lb-bad'); };
-    img.src = URL.createObjectURL(f);
-  };
-
   $('lb-good').onclick = function () { rate(true); };
   $('lb-bad').onclick = function () { rate(false); };
   function rate(good) {
@@ -1884,5 +1884,4 @@ h1 em{background:linear-gradient(90deg,var(--g),#27c4d8 50%,var(--g)) 0 0/200% 1
   };
 })();
 </script>
-
 </body></html>
