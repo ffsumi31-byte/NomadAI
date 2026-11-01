@@ -70,6 +70,7 @@ EFFORT_PROMPT = {
 }
 _EFFORT: "contextvars.ContextVar[Dict[str, Any]]" = contextvars.ContextVar("verdant_effort", default=EFFORTS["mid"])
 _TEMP: "contextvars.ContextVar[Optional[float]]" = contextvars.ContextVar("verdant_temp", default=None)
+_IMAGE: "contextvars.ContextVar[Optional[Tuple[str, str]]]" = contextvars.ContextVar("verdant_image", default=None)
 
 
 def norm_effort(v: Any) -> str:
@@ -583,6 +584,16 @@ async def _gemini_stream_once(client, url: str, headers: Dict[str, str], payload
         return 200, "".join(buf), finish, ""
 
 
+def _gemini_user_parts(user: str) -> List[Dict[str, Any]]:
+    img = _IMAGE.get()
+    if not img:
+        return [{"text": user}]
+    mime, data = img
+    note = ("A reference PHOTO is attached. Model exactly what it shows: the same subject, proportions, silhouette, "
+            "colours and distinguishing details.\n\n")
+    return [{"inlineData": {"mimeType": mime, "data": data}}, {"text": note + user}]
+
+
 async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
     requested = (model or DEFAULT_MODELS["gemini"]).strip()
     primary = normalize_gemini_model(requested)
@@ -605,7 +616,7 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
             gc["thinkingConfig"] = {"thinkingBudget": budget}
         payload = {
             "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "contents": [{"role": "user", "parts": _gemini_user_parts(user)}],
             "generationConfig": gc,
         }
         headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
@@ -730,13 +741,15 @@ async def call_llm(system: str, user: str, provider: str = "", model: str = "", 
                     raise
         errors: List[str] = []
         for name in ("gemini", "anthropic", "openai", "groq"):
-            if ENV_KEYS[name]:
+            if ENV_KEYS[name] and not (_IMAGE.get() and name != "gemini"):
                 try:
                     text, used = await CALLERS[name](client, ENV_KEYS[name], model if name == prov else "", system, user)
                     return text, {"provider": name, "model": used}
                 except ProviderError as e:
                     errors.append(f"{e.provider}: {e.message}")
         try:
+            if _IMAGE.get():
+                raise RuntimeError("photo builds need Gemini")
             return await call_pollinations(client, system, user), {"provider": "free-fallback", "model": "pollinations"}
         except Exception as e:
             errors.append(str(e))
@@ -2065,6 +2078,8 @@ class GenerateRequest(BaseModel):
     use_memory: bool = True
     publish: bool = True
     fresh: bool = False
+    image_b64: Optional[str] = ""
+    image_mime: Optional[str] = "image/jpeg"
 
 
 class ReviseRequest(BaseModel):
@@ -2784,13 +2799,62 @@ async def _build_new(req: GenerateRequest, prompt: str, base: Optional[Dict[str,
     return await _build_classic(req, prompt, base, added, dropped, progress, prof)
 
 
+PHOTO_PLACEHOLDER = "a model of the uploaded photo"
+
+
+async def _photo_to_prompt(req: "GenerateRequest", hint: str, progress: Progress) -> str:
+    """Gemini looks at the photo and writes the build request. The photo then rides along on every
+    Gemini call of this build (see _gemini_user_parts) so the model is built from what it shows."""
+    import base64
+    data = (req.image_b64 or "").strip()
+    mime = (req.image_mime or "image/jpeg").lower().strip()
+    if mime not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(status_code=400, detail="The photo must be a JPEG, PNG or WebP image.")
+    if len(data) > 4_000_000:
+        raise HTTPException(status_code=413, detail="The photo is too large. Use a smaller picture.")
+    try:
+        base64.b64decode(data, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="The photo data is not valid.")
+    prov = (req.provider or "").lower().strip()
+    if prov and prov != "gemini":
+        raise HTTPException(status_code=400, detail="Photo builds need Gemini, because it is the model that can see the picture. Pick Gemini in the AI panel.")
+    if not ((req.api_key or "").strip() or ENV_KEYS.get("gemini")):
+        raise HTTPException(status_code=401, detail="Photo builds need a Gemini key. Paste one in the AI panel or set GEMINI_API_KEY on the server.")
+    req.provider = "gemini"
+    req.fresh = True  # never answer a photo from the saved library; the photo is the request
+    _IMAGE.set((mime, data))
+    progress("Gemini is looking at your photo...")
+    hint = "" if hint.strip().lower() == PHOTO_PLACEHOLDER else hint.strip()
+    system = ("You look at a photo and write a build request for a blocky 3D model of its main subject. "
+              "Return ONLY JSON: {\"subject\": \"2-6 words naming the subject\", "
+              "\"prompt\": \"one build request, max 40 words: the subject, its key parts, proportions, colours and pose\"}. "
+              "Describe only what is really visible. No background scenery unless it is the subject.")
+    user = "Describe the attached photo as a build request." + (f' The user adds: "{hint}"' if hint else "")
+    text, _eng = await call_llm(system, user, "gemini", req.model or "", req.api_key or "")
+    try:
+        j = json.loads(re.search(r"\{.*\}", re.sub(r"```(?:json)?", "", text or ""), re.S).group(0))
+    except Exception:
+        j = {}
+    built = str(j.get("prompt") or "").strip()[:600]
+    subject = str(j.get("subject") or "").strip()[:120]
+    if not built:
+        raise HTTPException(status_code=502, detail="Gemini could not describe the photo. Try a clearer picture.")
+    progress(f"Gemini sees: {subject or built[:80]}", "ok")
+    progress(f"Build request from the photo: {built}")
+    return built
+
+
 async def run_generate(req: GenerateRequest, progress: Progress = _noop) -> Dict[str, Any]:
     prompt = req.prompt.strip()[:1000]
-    if not prompt:
-        raise HTTPException(status_code=400, detail="Prompt is required.")
+    if not prompt and not req.image_b64:
+        raise HTTPException(status_code=400, detail="Prompt or photo is required.")
     variant, effort = norm_variant(req.variant), norm_effort(req.effort)
     prof, rank = EFFORTS[effort], EFFORT_RANK[effort]
     _EFFORT.set(prof)
+    if req.image_b64:
+        prompt = await _photo_to_prompt(req, prompt, progress)
+        req.prompt = prompt
     tokens = prompt_tokens(prompt)
     key = prompt_key(tokens, variant)
 
@@ -2979,8 +3043,8 @@ def start_job(kind: str, coro_factory, max_s: Optional[float] = None) -> str:
 
 @app.post("/jobs/generate")
 async def job_generate(req: GenerateRequest):
-    if not req.prompt.strip():
-        raise HTTPException(status_code=400, detail="Prompt is required.")
+    if not req.prompt.strip() and not req.image_b64:
+        raise HTTPException(status_code=400, detail="Prompt or photo is required.")
     return {"job_id": start_job("generate", lambda p: run_generate(req, p), EFFORTS[norm_effort(req.effort)]["job_s"])}
 
 
@@ -3340,7 +3404,7 @@ def local_plan(prompt: str) -> Dict[str, Any]:
             best_name, best_score = name, score
     if best_name is None:
         return {"matched": False, "recipe": None, "steps": [],
-                "notes": ["No recipe matches this prompt. Add a photo, or teach a build you like."]}
+                "notes": ["No recipe matches this prompt. Teach a build you like, or use Build with AI."]}
     spec = LOCAL_RECIPES[best_name]
     accent = spec["default"]
     for word, hexv in LOCAL_NAMED_COLORS.items():
@@ -3351,53 +3415,6 @@ def local_plan(prompt: str) -> Dict[str, Any]:
     return {"matched": True, "recipe": best_name,
             "steps": [{"name": n, "parts": p} for n, p in steps],
             "notes": [f"Matched built-in recipe '{best_name}'."]}
-
-
-# ---------------- photo -> blocks (browser sends a downscaled grid of hex colours)
-
-def local_photo_to_steps(width: int, rows: List[str], depth: float = 1.0, quant_bits: int = 4,
-                         max_steps: int = 24) -> Dict[str, Any]:
-    grid_h = len(rows)
-    grid_w = width
-    if grid_w < 1 or grid_h < 1 or any(len(r) != grid_w * 6 for r in rows):
-        raise ValueError("Photo grid is malformed.")
-    step = 256 >> quant_bits
-
-    def q(v: int) -> int:
-        return min(255, (v // step) * step + step // 2)
-
-    cells = []
-    for r in rows:
-        line = []
-        for x in range(grid_w):
-            h = r[x * 6:x * 6 + 6]
-            line.append("#%02x%02x%02x" % tuple(q(int(h[i:i + 2], 16)) for i in (0, 2, 4)))
-        cells.append(line)
-
-    bands: List[List[Dict[str, Any]]] = []
-    pid = 0
-    for band_index, img_row in enumerate(range(grid_h - 1, -1, -1)):
-        band, x = [], 0
-        while x < grid_w:
-            col = cells[img_row][x]
-            run = 1
-            while x + run < grid_w and cells[img_row][x + run] == col:
-                run += 1
-            band.append(local_part(f"px_{pid}", [x + run / 2 - grid_w / 2, band_index + 0.5, 0], [run, 1, depth], col))
-            pid += 1
-            x += run
-        bands.append(band)
-
-    per = max(1, math.ceil(len(bands) / max(1, max_steps)))
-    steps = []
-    for start in range(0, len(bands), per):
-        group = bands[start:start + per]
-        lo_row, hi_row = start + 1, start + len(group)
-        steps.append({"name": f"Rows {lo_row}-{hi_row} of {len(bands)}" if per > 1 else f"Row {lo_row}",
-                      "parts": [p for b in group for p in b]})
-    return {"matched": True, "recipe": "photo_mosaic", "steps": steps,
-            "notes": [f"Photo converted to a {grid_w}x{grid_h} colour mosaic with {pid} blocks.",
-                      "This is a colour mosaic of the photo, not a 3D reconstruction."]}
 
 
 # ---------------- checks (floating parts and overlaps, spatial grid)
@@ -3464,8 +3481,6 @@ def local_store_job(job: Dict[str, Any]) -> None:
 
 class LocalBuildBody(BaseModel):
     prompt: str = ""
-    grid_width: Optional[int] = None
-    photo: Optional[Dict[str, Any]] = None  # {"width": int, "rows": ["rrggbb...", ...]}
 
 
 class LocalSaveBody(BaseModel):
@@ -3483,21 +3498,11 @@ async def local_build(body: LocalBuildBody):
     t0 = time.time()
     prompt = (body.prompt or "").strip()[:500]
     log = []
-    if body.photo:
-        try:
-            plan = local_photo_to_steps(int(body.photo["width"]), list(body.photo["rows"]))
-        except (KeyError, TypeError, ValueError) as e:
-            raise HTTPException(400, f"Bad photo data: {e}")
-        if len(body.photo["rows"]) > 64 or int(body.photo["width"]) > 64:
-            raise HTTPException(400, "Photo grid is limited to 64 x 64 blocks.")
-        log.append(f"Photo grid {body.photo['width']} x {len(body.photo['rows'])} received.")
-        if prompt:
-            plan["notes"].append("Prompt ignored for photo builds; the photo sets the model.")
-    elif prompt:
+    if prompt:
         plan = local_plan(prompt)
         log.append(f"Prompt matched: {plan['recipe'] or 'no recipe'}.")
     else:
-        raise HTTPException(400, "Give a prompt or a photo.")
+        raise HTTPException(400, "Give a prompt.")
 
     job_id = uuid.uuid4().hex[:12]
     if not plan["matched"]:
