@@ -90,8 +90,6 @@ def effort_range(lo: int, hi: int, prof: Dict[str, Any]) -> Tuple[int, int]:
 
 
 app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor + Universal Depth 3D Backend (v23)")
-from local_routes import router as local_router
-   app.include_router(local_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
@@ -3159,6 +3157,423 @@ async def workspace():
         return FileResponse(p, media_type="text/html")
     return HTMLResponse("<h3>workspace.html not found - put it next to server.py</h3>", status_code=404)
 
+
+# =====================================================================================
+# LOCAL BUILDER (no AI API): recipe planner, photo-to-blocks, step checks, taught recipes.
+# Renders are drawn in the browser (canvas), so this section needs no extra packages.
+# =====================================================================================
+from collections import defaultdict as _ldd, deque as _ldeque
+
+LOCAL_TEACH_FILE = Path(os.getenv("LOCAL_TEACH_FILE", "taught_recipes.json"))
+_LOCAL_LOCK = threading.RLock()
+LOCAL_JOBS: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+LOCAL_MAX_JOBS = 200
+LOCAL_NAMED_COLORS = {
+    "red": "#c0392b", "blue": "#2e6fd1", "green": "#2e9e4f", "yellow": "#f5c518", "orange": "#e67e22",
+    "purple": "#8e44ad", "pink": "#e88fb0", "white": "#eeeeee", "black": "#222222", "grey": "#8a8f98",
+    "gray": "#8a8f98", "brown": "#7b4a2a", "beige": "#d9c7a3", "cream": "#efe6d2", "gold": "#d4a72c", "teal": "#1b8c86",
+}
+LOCAL_COLOUR_WORDS = set(LOCAL_NAMED_COLORS)
+LOCAL_STOP = {"a", "an", "the", "with", "and", "of", "make", "me", "build", "create", "to", "for", "in", "on",
+              "my", "some", "small", "big", "tall", "little", "new"}
+
+
+def local_part(pid: str, pos, size, color: str) -> Dict[str, Any]:
+    return {"id": pid, "pos": [float(v) for v in pos], "size": [float(v) for v in size], "color": color}
+
+
+def local_hex_to_rgb(c: str) -> Tuple[int, int, int]:
+    c = c.lstrip("#")
+    return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+
+
+def local_shade(color: str, f: float) -> str:
+    r, g, b = local_hex_to_rgb(color)
+    return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(v * f)))) for v in (r, g, b))
+
+
+def _local_house(accent: str):
+    wall = "#d9c7a3"
+    roof = accent if accent != wall else "#8b2f2f"
+    door, win = "#6b4226", "#9fd8ff"
+    return [
+        ("Foundation", [local_part("found", [0, 0.5, 0], [12, 1, 10], "#8a8f98")]),
+        ("Side and back walls", [local_part("wall_back", [0, 3.5, -4.5], [12, 5, 1], wall),
+                                 local_part("wall_left", [-5.5, 3.5, 0], [1, 5, 8], wall),
+                                 local_part("wall_right", [5.5, 3.5, 0], [1, 5, 8], wall)]),
+        ("Front wall with door and windows", [
+            local_part("front_l", [-3.5, 3.5, 4.5], [5, 5, 1], wall),
+            local_part("front_r", [3.5, 3.5, 4.5], [5, 5, 1], wall),
+            local_part("front_top", [0, 5, 4.5], [2, 2, 1], wall),
+            local_part("door", [0, 2.5, 4.5], [2, 3, 1], door),
+            local_part("win_l", [-3.5, 3.5, 5.1], [2, 2, 0.2], win),
+            local_part("win_r", [3.5, 3.5, 5.1], [2, 2, 0.2], win)]),
+        ("Roof", [local_part("roof_l", [-3, 6.5, 0], [6, 1, 10], roof),
+                  local_part("roof_r", [3, 6.5, 0], [6, 1, 10], local_shade(roof, 0.85)),
+                  local_part("roof_ridge", [0, 7.5, 0], [1, 1, 10], local_shade(roof, 0.7))]),
+    ]
+
+
+def _local_tower(accent: str):
+    body = accent if accent != "#d9c7a3" else "#b9bec7"
+    steps = [("Base", [local_part("base", [0, 0.5, 0], [6, 1, 6], "#5b616b")])]
+    for i in range(1, 6):
+        y = 1 + (i - 0.5) * 2
+        steps.append((f"Floor {i}", [local_part(f"floor{i}", [0, y, 0], [5, 2, 5], body),
+                                     local_part(f"win{i}a", [0, y, 2.6], [2, 1, 0.2], "#9fd8ff")]))
+    steps.append(("Top cap", [local_part("cap", [0, 11.5, 0], [6, 1, 6], "#5b616b")]))
+    return steps
+
+
+def _local_stairs(accent: str):
+    col = accent if accent != "#d9c7a3" else "#c9a27a"
+    return [(f"Step {i + 1}", [local_part(f"stair{i}", [0, 0.5 + i, 2 + i], [4, 1, 2], col)]) for i in range(6)]
+
+
+def _local_car(accent: str):
+    body = accent if accent != "#d9c7a3" else "#2e6fd1"
+    wheels = "#222222"
+    return [
+        ("Chassis", [local_part("chassis", [0, 1.5, 0], [8, 1.5, 4], body)]),
+        ("Cabin base", [local_part("cabin", [-0.5, 2.75, 0], [4.5, 1, 3.4], local_shade(body, 0.85))]),
+        ("Windows", [local_part("glass", [-0.5, 3.75, 0], [4.5, 1, 3.4], "#9fd8ff")]),
+        ("Wheels", [local_part("wheel_fl", [-2.6, 0.7, 2.4], [1.4, 1.4, 0.8], wheels),
+                    local_part("wheel_fr", [2.6, 0.7, 2.4], [1.4, 1.4, 0.8], wheels),
+                    local_part("wheel_bl", [-2.6, 0.7, -2.4], [1.4, 1.4, 0.8], wheels),
+                    local_part("wheel_br", [2.6, 0.7, -2.4], [1.4, 1.4, 0.8], wheels)]),
+    ]
+
+
+LOCAL_RECIPES = {
+    "house": {"keys": ["house", "home", "cottage", "cabin", "hut"], "build": _local_house, "default": "#d9c7a3"},
+    "tower": {"keys": ["tower", "castle", "skyscraper", "building", "turret"], "build": _local_tower, "default": "#b9bec7"},
+    "stairs": {"keys": ["stairs", "stair", "staircase", "steps", "ladder"], "build": _local_stairs, "default": "#c9a27a"},
+    "car": {"keys": ["car", "vehicle", "truck", "taxi", "racecar", "auto"], "build": _local_car, "default": "#2e6fd1"},
+}
+
+
+# ---------------- teaching store (JSON file)
+
+def teach_keywords(prompt: str) -> List[str]:
+    seen, out = set(), []
+    for w in re.findall(r"[a-z]+", (prompt or "").lower()):
+        if w in LOCAL_STOP or w in LOCAL_COLOUR_WORDS or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+    return out
+
+
+def _teach_load() -> Dict[str, Any]:
+    try:
+        return json.loads(LOCAL_TEACH_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"recipes": []}
+
+
+def _teach_store(data: Dict[str, Any]) -> None:
+    tmp = LOCAL_TEACH_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(LOCAL_TEACH_FILE)
+
+
+def teach_save(prompt: str, steps: List[Dict[str, Any]], source_job: str) -> Dict[str, Any]:
+    kw = teach_keywords(prompt)
+    if not kw:
+        raise ValueError("Prompt needs at least one word that is not a colour or a stop word.")
+    with _LOCAL_LOCK:
+        data = _teach_load()
+        rec = {"id": uuid.uuid4().hex[:10], "prompt": prompt, "keywords": kw, "steps": steps,
+               "rating": 0, "uses": 0, "source_job": source_job, "created": time.time()}
+        data["recipes"].append(rec)
+        _teach_store(data)
+        return rec
+
+
+def teach_rate(recipe_id: str, good: bool) -> Optional[Dict[str, Any]]:
+    with _LOCAL_LOCK:
+        data = _teach_load()
+        for rec in data["recipes"]:
+            if rec["id"] == recipe_id:
+                rec["rating"] += 1 if good else -1
+                _teach_store(data)
+                return rec
+    return None
+
+
+def teach_match(prompt: str) -> Optional[Dict[str, Any]]:
+    words = set(re.findall(r"[a-z]+", (prompt or "").lower()))
+    best, best_score = None, 0
+    with _LOCAL_LOCK:
+        recipes = _teach_load()["recipes"]
+    for rec in recipes:
+        if rec["rating"] < -2:  # rated wrong too often: never used again
+            continue
+        overlap = sum(1 for k in rec["keywords"] if k in words)
+        if overlap == 0 or overlap * 2 < len(rec["keywords"]):
+            continue
+        score = overlap * 10 + rec["rating"]
+        if score > best_score:
+            best, best_score = rec, score
+    return best
+
+
+# ---------------- planner
+
+def local_plan(prompt: str) -> Dict[str, Any]:
+    hit = teach_match(prompt)
+    if hit:
+        with _LOCAL_LOCK:
+            data = _teach_load()
+            for r in data["recipes"]:
+                if r["id"] == hit["id"]:
+                    r["uses"] += 1
+            _teach_store(data)
+        return {"matched": True, "recipe": f"taught:{hit['id']}", "steps": hit["steps"],
+                "notes": [f"Used a taught recipe from \"{hit['prompt']}\" (rating {hit['rating']:+d})."]}
+
+    words = set(re.findall(r"[a-z]+", (prompt or "").lower()))
+    best_name, best_score = None, 0
+    for name, spec in LOCAL_RECIPES.items():
+        score = sum(1 for k in spec["keys"] if k in words)
+        if score > best_score:
+            best_name, best_score = name, score
+    if best_name is None:
+        return {"matched": False, "recipe": None, "steps": [],
+                "notes": ["No recipe matches this prompt. Add a photo, or teach a build you like."]}
+    spec = LOCAL_RECIPES[best_name]
+    accent = spec["default"]
+    for word, hexv in LOCAL_NAMED_COLORS.items():
+        if re.search(r"\b" + word + r"\b", (prompt or "").lower()):
+            accent = hexv
+            break
+    steps = spec["build"](accent)
+    return {"matched": True, "recipe": best_name,
+            "steps": [{"name": n, "parts": p} for n, p in steps],
+            "notes": [f"Matched built-in recipe '{best_name}'."]}
+
+
+# ---------------- photo -> blocks (browser sends a downscaled grid of hex colours)
+
+def local_photo_to_steps(width: int, rows: List[str], depth: float = 1.0, quant_bits: int = 4,
+                         max_steps: int = 24) -> Dict[str, Any]:
+    grid_h = len(rows)
+    grid_w = width
+    if grid_w < 1 or grid_h < 1 or any(len(r) != grid_w * 6 for r in rows):
+        raise ValueError("Photo grid is malformed.")
+    step = 256 >> quant_bits
+
+    def q(v: int) -> int:
+        return min(255, (v // step) * step + step // 2)
+
+    cells = []
+    for r in rows:
+        line = []
+        for x in range(grid_w):
+            h = r[x * 6:x * 6 + 6]
+            line.append("#%02x%02x%02x" % tuple(q(int(h[i:i + 2], 16)) for i in (0, 2, 4)))
+        cells.append(line)
+
+    bands: List[List[Dict[str, Any]]] = []
+    pid = 0
+    for band_index, img_row in enumerate(range(grid_h - 1, -1, -1)):
+        band, x = [], 0
+        while x < grid_w:
+            col = cells[img_row][x]
+            run = 1
+            while x + run < grid_w and cells[img_row][x + run] == col:
+                run += 1
+            band.append(local_part(f"px_{pid}", [x + run / 2 - grid_w / 2, band_index + 0.5, 0], [run, 1, depth], col))
+            pid += 1
+            x += run
+        bands.append(band)
+
+    per = max(1, math.ceil(len(bands) / max(1, max_steps)))
+    steps = []
+    for start in range(0, len(bands), per):
+        group = bands[start:start + per]
+        lo_row, hi_row = start + 1, start + len(group)
+        steps.append({"name": f"Rows {lo_row}-{hi_row} of {len(bands)}" if per > 1 else f"Row {lo_row}",
+                      "parts": [p for b in group for p in b]})
+    return {"matched": True, "recipe": "photo_mosaic", "steps": steps,
+            "notes": [f"Photo converted to a {grid_w}x{grid_h} colour mosaic with {pid} blocks.",
+                      "This is a colour mosaic of the photo, not a 3D reconstruction."]}
+
+
+# ---------------- checks (floating parts and overlaps, spatial grid)
+
+def local_check(parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    boxes = []
+    for p in parts:
+        (x, y, z), (w, h, d) = p["pos"], p["size"]
+        boxes.append(((x - w / 2, y - h / 2, z - d / 2), (x + w / 2, y + h / 2, z + d / 2), p["id"]))
+    cell = 2.0
+    grid: Dict[Tuple[int, int, int], List[int]] = _ldd(list)
+    for i, (lo, hi, _) in enumerate(boxes):
+        for cx in range(math.floor(lo[0] / cell), math.floor(hi[0] / cell) + 1):
+            for cy in range(math.floor(lo[1] / cell), math.floor(hi[1] / cell) + 1):
+                for cz in range(math.floor(lo[2] / cell), math.floor(hi[2] / cell) + 1):
+                    grid[(cx, cy, cz)].append(i)
+
+    def near(i):
+        lo, hi, _ = boxes[i]
+        seen = set()
+        for cx in range(math.floor((lo[0] - 0.1) / cell), math.floor((hi[0] + 0.1) / cell) + 1):
+            for cy in range(math.floor((lo[1] - 0.1) / cell), math.floor((hi[1] + 0.1) / cell) + 1):
+                for cz in range(math.floor((lo[2] - 0.1) / cell), math.floor((hi[2] + 0.1) / cell) + 1):
+                    seen.update(grid.get((cx, cy, cz), ()))
+        seen.discard(i)
+        return seen
+
+    adj: Dict[int, List[int]] = _ldd(list)
+    overlaps = 0
+    for i in range(len(boxes)):
+        lo, hi, _ = boxes[i]
+        for j in near(i):
+            if j < i:
+                continue
+            lo2, hi2, _ = boxes[j]
+            ov = [min(hi[k], hi2[k]) - max(lo[k], lo2[k]) for k in range(3)]
+            if all(o > 0.01 for o in ov):
+                overlaps += 1
+                continue
+            touching = [abs(hi2[k] - lo[k]) < 0.05 or abs(hi[k] - lo2[k]) < 0.05 for k in range(3)]
+            if sum(touching) == 1:
+                k = touching.index(True)
+                if all(ov[idx] > 0.01 for idx in range(3) if idx != k):
+                    adj[i].append(j)
+                    adj[j].append(i)
+    reached = {i for i, (lo, _, _) in enumerate(boxes) if lo[1] <= 0.01}
+    q = _ldeque(reached)
+    while q:
+        i = q.popleft()
+        for j in adj[i]:
+            if j not in reached:
+                reached.add(j)
+                q.append(j)
+    floating = [boxes[i][2] for i in range(len(boxes)) if i not in reached]
+    return {"parts": len(parts), "floating": floating[:20], "floating_count": len(floating),
+            "overlaps": overlaps, "ok": not floating and overlaps == 0}
+
+
+def local_store_job(job: Dict[str, Any]) -> None:
+    LOCAL_JOBS[job["id"]] = job
+    while len(LOCAL_JOBS) > LOCAL_MAX_JOBS:
+        LOCAL_JOBS.popitem(last=False)
+
+
+class LocalBuildBody(BaseModel):
+    prompt: str = ""
+    grid_width: Optional[int] = None
+    photo: Optional[Dict[str, Any]] = None  # {"width": int, "rows": ["rrggbb...", ...]}
+
+
+class LocalSaveBody(BaseModel):
+    job_id: str
+    prompt: Optional[str] = None
+
+
+class LocalRateBody(BaseModel):
+    job_id: str
+    good: bool
+
+
+@app.post("/local/build")
+async def local_build(body: LocalBuildBody):
+    t0 = time.time()
+    prompt = (body.prompt or "").strip()[:500]
+    log = []
+    if body.photo:
+        try:
+            plan = local_photo_to_steps(int(body.photo["width"]), list(body.photo["rows"]))
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(400, f"Bad photo data: {e}")
+        if len(body.photo["rows"]) > 64 or int(body.photo["width"]) > 64:
+            raise HTTPException(400, "Photo grid is limited to 64 x 64 blocks.")
+        log.append(f"Photo grid {body.photo['width']} x {len(body.photo['rows'])} received.")
+        if prompt:
+            plan["notes"].append("Prompt ignored for photo builds; the photo sets the model.")
+    elif prompt:
+        plan = local_plan(prompt)
+        log.append(f"Prompt matched: {plan['recipe'] or 'no recipe'}.")
+    else:
+        raise HTTPException(400, "Give a prompt or a photo.")
+
+    job_id = uuid.uuid4().hex[:12]
+    if not plan["matched"]:
+        job = {"id": job_id, "status": "unmatched", "prompt": prompt, "steps": [], "notes": plan["notes"], "log": log}
+        local_store_job(job)
+        return job
+
+    snaps, acc = [], []
+    steps_out = []
+    for i, s in enumerate(plan["steps"], start=1):
+        acc = acc + s["parts"]
+        snaps.append(acc)
+        steps_out.append({"index": i, "name": s["name"], "new_parts": len(s["parts"]), "total_parts": len(acc),
+                          "parts": s["parts"], "check": local_check(acc) if i == len(plan["steps"]) else None})
+        log.append(f"Step {i}: {s['name']} (+{len(s['parts'])} parts).")
+    final_parts = snaps[-1]
+    final_check = local_check(final_parts)
+    steps_out[-1]["check"] = final_check
+    job = {"id": job_id, "status": "done", "prompt": prompt, "recipe": plan["recipe"], "steps": steps_out,
+           "check": final_check, "notes": plan["notes"],
+           "log": log + [f"Finished in {time.time() - t0:.2f}s."],
+           "plan": plan["steps"]}
+    local_store_job(job)
+    return {k: v for k, v in job.items() if k != "plan"}
+
+
+@app.get("/local/jobs/{job_id}")
+async def local_job(job_id: str):
+    job = LOCAL_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Unknown job.")
+    return {k: v for k, v in job.items() if k != "plan"}
+
+
+@app.post("/teach/save")
+async def teach_save_route(body: LocalSaveBody):
+    job = LOCAL_JOBS.get(body.job_id)
+    if not job or job.get("status") != "done":
+        raise HTTPException(404, "No finished build with that id.")
+    try:
+        rec = teach_save((body.prompt or job.get("prompt") or "").strip(), job["plan"], body.job_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"saved": True, "recipe_id": rec["id"], "keywords": rec["keywords"]}
+
+
+@app.post("/teach/rate")
+async def teach_rate_route(body: LocalRateBody):
+    job = LOCAL_JOBS.get(body.job_id)
+    if not job:
+        raise HTTPException(404, "Unknown job.")
+    recipe = job.get("recipe") or ""
+    if not recipe.startswith("taught:"):
+        return {"rated": False, "note": "Built-in recipes are not rated. Save a good build to teach it."}
+    rec = teach_rate(recipe.split(":", 1)[1], body.good)
+    if rec is None:
+        raise HTTPException(404, "Taught recipe not found.")
+    return {"rated": True, "recipe_id": rec["id"], "rating": rec["rating"]}
+
+
+@app.get("/teach/list")
+async def teach_list_route():
+    return {"recipes": [{k: v for k, v in r.items() if k != "steps"} | {"step_count": len(r["steps"])}
+                        for r in _teach_load()["recipes"]]}
+
+
+@app.delete("/teach/{recipe_id}")
+async def teach_delete_route(recipe_id: str):
+    with _LOCAL_LOCK:
+        data = _teach_load()
+        before = len(data["recipes"])
+        data["recipes"] = [r for r in data["recipes"] if r["id"] != recipe_id]
+        if len(data["recipes"]) == before:
+            raise HTTPException(404, "Not found.")
+        _teach_store(data)
+    return {"deleted": True}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
