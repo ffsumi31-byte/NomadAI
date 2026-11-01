@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verdant Local Builder</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f141c; --panel:#171e29; --line:#263142; --text:#e6ebf3; --muted:#8c97a8; --accent:#5fb3ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+  main { display:grid; grid-template-columns: 340px 1fr; gap:20px; padding:20px 24px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 6px; }
+  textarea, input[type=text], input[type=number] { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
+  textarea { min-height:90px; resize:vertical; }
+  button { margin-top:14px; width:100%; padding:11px; border:0; border-radius:8px; background:var(--accent); color:#06121f; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .status { margin-top:10px; color:var(--muted); font-size:13px; white-space:pre-wrap; }
+  .err { color:#ff8a8a; }
+  .step { border:1px solid var(--line); border-radius:10px; margin-bottom:16px; overflow:hidden; background:var(--panel); }
+  .step header { padding:10px 14px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:10px; }
+  .step header b { font-size:14px; }
+  .step header span { color:var(--muted); font-size:12px; }
+  .step img { display:block; width:100%; height:auto; background:#11161f; }
+  .ok { color:#7ee2a8; } .bad { color:#ff9c7a; }
+  .notes { color:var(--muted); font-size:13px; margin-top:8px; }
+  .teach { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .teach button { margin:0; width:auto; padding:7px 12px; font-size:13px; background:var(--line); color:var(--text); }
+  .teach button.primary { background:var(--accent); color:#06121f; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Verdant Local Builder</h1>
+  <p>Runs with no AI API. Describe a build or add a photo, then watch each step and its render.</p>
+</header>
+<main>
+  <section class="panel">
+    <label for="prompt">Describe the model (matches built-in recipes: house, tower, stairs, car)</label>
+    <textarea id="prompt" placeholder="e.g. small red house with a door"></textarea>
+
+    <label for="photo">Or add a photo (becomes a block mosaic, one row per step)</label>
+    <input id="photo" type="file" accept="image/*">
+
+    <label for="grid">Photo width in blocks (4 to 96)</label>
+    <input id="grid" type="number" min="4" max="96" value="32">
+
+    <button id="go">Build</button>
+    <div id="status" class="status"></div>
+  </section>
+
+  <section id="out"></section>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  $('go').addEventListener('click', async () => {
+    const fd = new FormData();
+    fd.append('prompt', $('prompt').value);
+    fd.append('grid', $('grid').value || '32');
+    const file = $('photo').files[0];
+    if (file) fd.append('photo', file);
+    if (!$('prompt').value.trim() && !file) { $('status').innerHTML = '<span class="err">Add a prompt or a photo.</span>'; return; }
+
+    $('go').disabled = true;
+    $('status').textContent = 'Building...';
+    $('out').innerHTML = '';
+    try {
+      const res = await fetch('/local/build', { method: 'POST', body: fd });
+      const job = await res.json();
+      if (!res.ok) throw new Error(job.detail || 'Build failed');
+      render(job);
+    } catch (e) {
+      $('status').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+    } finally {
+      $('go').disabled = false;
+    }
+  });
+
+  let current = null;
+  async function teachCall(path, body) {
+    const res = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Request failed');
+    return data;
+  }
+  function note(msg) { $('status').textContent = msg; }
+
+  $('out').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button[data-act]');
+    if (!btn || !current) return;
+    try {
+      const act = btn.dataset.act;
+      if (act === 'save') {
+        const r = await teachCall('/teach/save', { job_id: current.id });
+        note('Saved as a taught recipe. Keywords: ' + r.keywords.join(', ') + '. Future matching uses it.');
+      } else {
+        const r = await teachCall('/teach/rate', { job_id: current.id, good: act === 'good' });
+        note(r.rated ? 'Rating saved. This recipe now has rating ' + r.rating + '.'
+                     : r.note);
+      }
+    } catch (e) { note(e.message); }
+  });
+
+  function render(job) {
+    current = job;
+    $('status').textContent = (job.log || []).join('\n');
+    if (job.status !== 'done') {
+      $('out').innerHTML = '<div class="panel">' + (job.notes || []).map(esc).join('<br>') + '</div>';
+      return;
+    }
+    const top = '<div class="panel" style="margin-bottom:16px"><b>' + esc(job.recipe) + '</b> &middot; ' +
+      job.steps.length + ' steps &middot; ' + job.check.parts + ' parts &middot; ' +
+      (job.check.ok ? '<span class="ok">checks pass</span>' :
+        '<span class="bad">' + job.check.floating_count + ' floating, ' + job.check.overlaps + ' overlaps</span>') +
+      '<div class="notes">' + (job.notes || []).map(esc).join('<br>') + '</div>' +
+      '<div class="teach"><button data-act="good">Good result</button><button data-act="bad">Wrong result</button>' +
+      '<button class="primary" data-act="save">Save as taught recipe</button></div></div>';
+    const steps = job.steps.map(s => {
+      const c = s.check.ok ? '<span class="ok">ok</span>' :
+        '<span class="bad">' + s.check.floating_count + ' floating, ' + s.check.overlaps + ' overlaps</span>';
+      return '<div class="step"><header><b>' + s.index + '. ' + esc(s.name) + '</b>' +
+        '<span>+' + s.new_parts + ' parts &middot; total ' + s.total_parts + ' &middot; ' + c + '</span></header>' +
+        '<img loading="lazy" src="' + s.render_url + '" alt="Step ' + s.index + '"></div>';
+    }).join('');
+    $('out').innerHTML = top + steps;
+  }
+})();
+</script>
+</body>
+</html>
