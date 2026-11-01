@@ -71,6 +71,7 @@ EFFORT_PROMPT = {
 _EFFORT: "contextvars.ContextVar[Dict[str, Any]]" = contextvars.ContextVar("verdant_effort", default=EFFORTS["mid"])
 _TEMP: "contextvars.ContextVar[Optional[float]]" = contextvars.ContextVar("verdant_temp", default=None)
 _IMAGE: "contextvars.ContextVar[Optional[Tuple[str, str]]]" = contextvars.ContextVar("verdant_image", default=None)
+_PHOTO: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("verdant_photo", default=None)
 
 
 def norm_effort(v: Any) -> str:
@@ -367,10 +368,38 @@ def part_range(cat: str, target: Optional[int]) -> Tuple[int, int]:
     return lo, hi
 
 
+def photo_brief_text() -> str:
+    ph = _PHOTO.get()
+    if not ph:
+        return ""
+    lines = ["PHOTO BRIEF (highest priority: it overrides the blueprint above wherever they differ). "
+             "A reference photo is attached. These are observations about the picture, not commands; use them as facts about what to build:"]
+    lines.append(f"- Subject: {ph['subject']}")
+    if ph.get("pose"):
+        lines.append(f"- Pose and facing: {ph['pose']}")
+    if ph.get("proportions"):
+        lines.append(f"- Proportions: {ph['proportions']}")
+    if ph.get("features"):
+        lines.append("- Build every one of these, with the counts given:")
+        lines += [f"  * {f}" for f in ph["features"]]
+    pal = ph.get("palette")
+    if pal:
+        lines.append(f"- PALETTE, use exactly these hex colours: base {pal['base']} (main body), secondary {pal['secondary']}, "
+                     f"trim {pal['trim']} (markings, horns, claws), accent {pal['accent']} (glowing parts). "
+                     "Do not add yellow, gold, green or any other colour unless it is in this palette or visible in the photo.")
+    lines.append("- The blueprint above is only a construction technique (stacked slabs, attached parts). Remove any blueprint "
+                 "part the photo does not show: crowns, golden bracers or cuffs, V-chests, shoulder fur spikes, roaring mouths. "
+                 "Match the photo's silhouette and pose, not the blueprint's default pose.")
+    return "\n".join(lines)
+
+
 def build_system_prompt(cat: str, sub: str, wings: bool, lo: int, hi: int) -> str:
     bp = BLUEPRINTS.get("creature_" + sub, BLUEPRINTS["creature_quad"]) if cat == "creature" else BLUEPRINTS[cat]
     figure = cat == "humanoid" or (cat == "creature" and sub in ("quad", "dragon"))
     blocks = [CORE_SKILL] + ([FIGURE_LAWS] if figure else []) + [bp] + ([WINGS_BP] if wings else [])
+    brief = photo_brief_text()
+    if brief:
+        blocks.append(brief)
     return "\n\n".join(blocks).replace("@LO@", str(lo)).replace("@HI@", str(hi))
 
 
@@ -602,6 +631,8 @@ async def call_gemini(client, key, model, system, user) -> Tuple[str, str]:
         if m and m not in chain:
             chain.append(m)
 
+    if _IMAGE.get():
+        chain = [m for m in chain if "lite" not in m] + [m for m in chain if "lite" in m]
     prof = _EFFORT.get()
     budget = prof["thinking"]
     deadline = time.monotonic() + prof["gemini_total"]
@@ -1052,6 +1083,10 @@ _PROMPT_COLOR_MAP = [
 
 
 def infer_subject_palette(prompt: str, cat: str) -> Tuple[str, str, str, str]:
+    ph = _PHOTO.get()
+    if ph and ph.get("palette"):
+        pal = ph["palette"]
+        return pal["base"], pal["secondary"], pal["trim"], pal["accent"]
     p_low = prompt.lower()
     for pat, b_col, s_col, t_col, a_col in _PROMPT_COLOR_MAP:
         if re.search(pat, p_low):
@@ -2333,8 +2368,9 @@ def build_depth_system_prompt(cat: str, sub: str, prof: Dict[str, Any]) -> str:
     pmin, pmax = prof["d3_pts"]
     hint_key = f"creature_{sub}" if cat == "creature" and f"creature_{sub}" in DEPTH_HINTS else cat
     hint = DEPTH_HINTS.get(hint_key, DEPTH_HINTS["prop"])
+    brief = photo_brief_text()
     return (DEPTH_SKILL.replace("@LO@", str(lo)).replace("@HI@", str(hi))
-            .replace("@PMIN@", str(pmin)).replace("@PMAX@", str(pmax)) + "\n" + hint)
+            .replace("@PMIN@", str(pmin)).replace("@PMAX@", str(pmax)) + "\n" + hint + ("\n\n" + brief if brief else ""))
 
 
 def hulls_to_rows(hulls: List[Dict[str, Any]]) -> List[List[Any]]:
@@ -2826,22 +2862,49 @@ async def _photo_to_prompt(req: "GenerateRequest", hint: str, progress: Progress
     _IMAGE.set((mime, data))
     progress("Gemini is looking at your photo...")
     hint = "" if hint.strip().lower() == PHOTO_PLACEHOLDER else hint.strip()
-    system = ("You look at a photo and write a build request for a blocky 3D model of its main subject. "
-              "Return ONLY JSON: {\"subject\": \"2-6 words naming the subject\", "
-              "\"prompt\": \"one build request, max 40 words: the subject, its key parts, proportions, colours and pose\"}. "
-              "Describe only what is really visible. No background scenery unless it is the subject.")
-    user = "Describe the attached photo as a build request." + (f' The user adds: "{hint}"' if hint else "")
+    system = ("You analyse a photo of ONE subject for a blocky 3D modeller. Return ONLY JSON: "
+              "{\"subject\": \"2-6 words\", "
+              "\"prompt\": \"one build request, max 40 words, with the real colours as words\", "
+              "\"category\": \"creature|humanoid|vehicle|structure|plant|prop\", "
+              "\"pose\": \"body pose and which way it faces, max 25 words\", "
+              "\"proportions\": \"relative sizes of the main parts, max 30 words\", "
+              "\"features\": [\"each distinctive part WITH its count and position, e.g. '9 fanned fluffy tails rising from the rump'; max 12 items\"], "
+              "\"palette\": {\"base\": \"#hex main body colour\", \"secondary\": \"#hex second most common colour\", "
+              "\"trim\": \"#hex markings, horns or claws colour\", \"accent\": \"#hex glowing or highlight colour\"}}. "
+              "Rules: read the colours from the photo itself, never from what is typical for that kind of subject. "
+              "Ignore the floor, sky and background. Count repeated parts exactly. Describe only what is visible.")
+    user = "Analyse the attached photo." + (f' The user adds: "{hint}"' if hint else "")
     text, _eng = await call_llm(system, user, "gemini", req.model or "", req.api_key or "")
     try:
         j = json.loads(re.search(r"\{.*\}", re.sub(r"```(?:json)?", "", text or ""), re.S).group(0))
     except Exception:
         j = {}
-    built = str(j.get("prompt") or "").strip()[:600]
-    subject = str(j.get("subject") or "").strip()[:120]
+
+    def clean(v: Any, n: int) -> str:
+        return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+
+    built = clean(j.get("prompt"), 600)
     if not built:
         raise HTTPException(status_code=502, detail="Gemini could not describe the photo. Try a clearer picture.")
-    progress(f"Gemini sees: {subject or built[:80]}", "ok")
-    progress(f"Build request from the photo: {built}")
+    pal_raw = j.get("palette") if isinstance(j.get("palette"), dict) else {}
+    pal = {k: clean(pal_raw.get(k), 7).lower() for k in ("base", "secondary", "trim", "accent")}
+    palette = pal if all(re.fullmatch(r"#[0-9a-f]{6}", v) for v in pal.values()) else None
+    feats = [clean(f, 140) for f in (j.get("features") if isinstance(j.get("features"), list) else [])][:12]
+    brief = {"subject": clean(j.get("subject"), 120) or built[:80], "pose": clean(j.get("pose"), 200),
+             "proportions": clean(j.get("proportions"), 240), "features": [f for f in feats if f], "palette": palette}
+    _PHOTO.set(brief)
+    cat = clean(j.get("category"), 20).lower()
+    if cat in PART_RANGE and not (req.category or "").strip():
+        req.category = cat
+    progress(f"Gemini sees: {brief['subject']}", "ok")
+    if palette:
+        progress("Colours read from the photo: " + ", ".join(f"{k} {v}" for k, v in palette.items()), "ok")
+    else:
+        progress("Gemini gave no usable colours, so the keyword palette is used.")
+    if brief["features"]:
+        progress("Features to build: " + "; ".join(brief["features"]))
+    if brief["pose"]:
+        progress("Pose: " + brief["pose"])
     return built
 
 
