@@ -90,6 +90,8 @@ def effort_range(lo: int, hi: int, prof: Dict[str, Any]) -> Tuple[int, int]:
 
 
 app = FastAPI(title="Verdant 3D - Multi-Slab Brick Sculptor + Universal Depth 3D Backend (v23)")
+from local_routes import router as local_router
+   app.include_router(local_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # --------------------------------------------------------------------------- config
